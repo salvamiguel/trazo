@@ -34,10 +34,25 @@ describe('icon packs', () => {
 
   it('indexes every pack with titles and categories for search', async () => {
     const index = await iconIndex();
-    expect(Object.keys(index).sort()).toEqual(['aws', 'azure', 'logos', 'tabler']);
+    expect(Object.keys(index).sort()).toEqual(['aws', 'azure', 'cncf', 'k8s', 'logos', 'tabler']);
     expect(Object.keys(index.aws!.icons).length).toBeGreaterThan(700);
     expect(index.azure!.icons['kubernetes-services']).toEqual(['Kubernetes Services', 'Compute']);
     expect(index.aws!.aliases.eks).toBe('elastic-kubernetes-service');
+    expect(index.k8s!.icons.deployment).toEqual(['Deployment', 'Workloads']);
+    expect(index.k8s!.aliases.svc).toBe('service');
+    expect(index.cncf!.icons.istio).toEqual(['Istio', 'Service mesh']);
+  });
+
+  it('resolves Kubernetes kinds by name or kubectl short name, and project logos', async () => {
+    const { loadIconSets } = await import('../src/index.ts');
+    await loadIconSets(['k8s', 'cncf']);
+    expect(resolveIconId('k8s/deploy')).toBe('k8s:deploy');
+    const shape = (ref: string) => getIcon(ref)!.body;
+    expect(shape('k8s/deploy')).toBe(shape('k8s/deployment'));
+    expect(shape('k8s/ing')).toBe(shape('k8s/ingress'));
+    expect(resolveIconId('cncf/istio')).toBe('cncf:istio');
+    expect(resolveIconId('k8s/kubernetes')).toBe('logos:kubernetes');
+    expect(getIcon('cncf/istio')!.mono).toBe(false);
   });
 });
 

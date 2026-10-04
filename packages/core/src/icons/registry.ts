@@ -14,6 +14,8 @@ export { resolveIconId };
 const LOADERS: Record<string, () => Promise<IconifyJSON>> = {
   aws: () => import('../../icons/aws.json', { with: { type: 'json' } }).then((m) => m.default as IconifyJSON),
   azure: () => import('../../icons/azure.json', { with: { type: 'json' } }).then((m) => m.default as IconifyJSON),
+  k8s: () => import('../../icons/k8s.json', { with: { type: 'json' } }).then((m) => m.default as IconifyJSON),
+  cncf: () => import('../../icons/cncf.json', { with: { type: 'json' } }).then((m) => m.default as unknown as IconifyJSON),
   logos: () => import('@iconify-json/logos/icons.json', { with: { type: 'json' } }).then((m) => m.default as IconifyJSON),
   tabler: () => import('@iconify-json/tabler/icons.json', { with: { type: 'json' } }).then((m) => m.default as IconifyJSON),
 };

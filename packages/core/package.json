@@ -22,6 +22,8 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@iconify-json/devicon": "1.2.68",
+    "@iconify-json/k8s": "1.2.1",
     "@iconify/tools": "^5.0.14",
     "@squinch/pack-azure": "0.14.0",
     "@types/node": "^26.6.4",

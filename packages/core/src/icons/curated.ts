@@ -5,7 +5,7 @@
  */
 export type CuratedIcon = [ref: string, label: string, nodeType?: string];
 
-export const CURATED: Record<'aws' | 'azure' | 'k8s' | 'ai' | 'iac' | 'data' | 'cloud', CuratedIcon[]> = {
+export const CURATED: Record<'aws' | 'azure' | 'k8s' | 'cncf' | 'ai' | 'iac' | 'data' | 'cloud', CuratedIcon[]> = {
   aws: [
     ['aws/lambda', 'Lambda'], ['aws/ec2', 'EC2'], ['aws/ecs', 'ECS'], ['aws/eks', 'EKS'], ['aws/fargate', 'Fargate'],
     ['aws/ecr', 'ECR'], ['aws/api-gateway', 'API Gateway'], ['aws/alb', 'Application Load Balancer'],
@@ -43,9 +43,29 @@ export const CURATED: Record<'aws' | 'azure' | 'k8s' | 'ai' | 'iac' | 'data' | '
     ['azure/application-insights', 'Application Insights'],
   ],
   k8s: [
-    ['k8s/kubernetes', 'Kubernetes', 'system'], ['cncf/helm', 'Helm'], ['cncf/argocd', 'Argo CD'], ['flux', 'Flux'],
-    ['docker-icon', 'Docker'], ['prometheus', 'Prometheus'], ['grafana', 'Grafana'], ['opentelemetry-icon', 'OpenTelemetry'],
-    ['envoy-icon', 'Envoy'], ['linkerd', 'Linkerd'], ['nginx', 'NGINX'], ['kong-icon', 'Kong'],
+    ['k8s/kubernetes', 'Kubernetes', 'system'], ['k8s/pod', 'Pod'], ['k8s/deployment', 'Deployment'],
+    ['k8s/statefulset', 'StatefulSet'], ['k8s/daemonset', 'DaemonSet'], ['k8s/replicaset', 'ReplicaSet'], ['k8s/job', 'Job'],
+    ['k8s/cronjob', 'CronJob'], ['k8s/hpa', 'HPA'], ['k8s/service', 'Service'],
+    ['k8s/ingress', 'Ingress'], ['k8s/netpol', 'NetworkPolicy', 'network'], ['k8s/endpoints', 'Endpoints', 'network'],
+    ['k8s/configmap', 'ConfigMap', 'data-asset'], ['k8s/secret', 'Secret', 'data-asset'], ['k8s/pvc', 'PVC', 'data-asset'],
+    ['k8s/pv', 'PV', 'data-asset'], ['k8s/storageclass', 'StorageClass', 'data-asset'],
+    ['k8s/serviceaccount', 'ServiceAccount', 'actor'], ['k8s/role', 'Role'], ['k8s/rolebinding', 'RoleBinding'],
+    ['k8s/crd', 'CRD'], ['k8s/namespace', 'Namespace', 'system'], ['k8s/node', 'Node'],
+    ['k8s/api-server', 'API server'], ['k8s/etcd', 'etcd', 'database'], ['k8s/scheduler', 'Scheduler'],
+    ['k8s/controller-manager', 'Controller manager'], ['k8s/kubelet', 'kubelet'], ['k8s/kube-proxy', 'kube-proxy'],
+  ],
+  cncf: [
+    ['cncf/istio', 'Istio'], ['cncf/linkerd', 'Linkerd'], ['cncf/envoy', 'Envoy'], ['cncf/cilium', 'Cilium', 'network'],
+    ['cncf/ingress-nginx', 'Ingress NGINX'], ['cncf/traefik', 'Traefik'], ['cncf/envoy-gateway', 'Envoy Gateway'],
+    ['kong-icon', 'Kong'], ['cncf/contour', 'Contour'], ['cncf/emissary-ingress', 'Emissary-ingress'],
+    ['cncf/cert-manager', 'cert-manager'], ['cncf/external-secrets', 'External Secrets'], ['vault-icon', 'Vault'],
+    ['cncf/opa', 'OPA Gatekeeper'], ['cncf/kyverno', 'Kyverno'], ['cncf/falco', 'Falco'], ['cncf/argo', 'Argo CD'],
+    ['cncf/flux', 'Flux'], ['cncf/helm', 'Helm'], ['cncf/crossplane', 'Crossplane'], ['cncf/tekton', 'Tekton'],
+    ['cncf/keda', 'KEDA'], ['cncf/karpenter', 'Karpenter'], ['cncf/knative', 'Knative'], ['cncf/prometheus', 'Prometheus'],
+    ['grafana', 'Grafana'], ['cncf/opentelemetry', 'OpenTelemetry'], ['cncf/jaeger', 'Jaeger'], ['cncf/fluentd', 'Fluentd'],
+    ['cncf/thanos', 'Thanos'], ['cncf/velero', 'Velero'], ['cncf/coredns', 'CoreDNS', 'network'],
+    ['cncf/metallb', 'MetalLB', 'network'], ['cncf/harbor', 'Harbor'], ['cncf/strimzi', 'Strimzi'], ['cncf/dapr', 'Dapr'],
+    ['cncf/backstage', 'Backstage'], ['cncf/kserve', 'KServe'], ['docker-icon', 'Docker'], ['cncf/containerd', 'containerd'],
   ],
   ai: [
     ['ai/anthropic', 'Claude'], ['ai/openai', 'OpenAI'], ['google-gemini-icon', 'Gemini'], ['mistral-ai-icon', 'Mistral'],
@@ -54,7 +74,8 @@ export const CURATED: Record<'aws' | 'azure' | 'k8s' | 'ai' | 'iac' | 'data' | '
   ],
   iac: [
     ['hashicorp/terraform', 'Terraform'], ['vault-icon', 'Vault'], ['consul', 'Consul'], ['nomad-icon', 'Nomad'],
-    ['pulumi-icon', 'Pulumi'], ['ansible', 'Ansible'], ['github-actions', 'GitHub Actions'], ['gitlab-icon', 'GitLab'],
+    ['pulumi-icon', 'Pulumi'], ['ansible', 'Ansible'], ['github-icon', 'GitHub'], ['github-actions', 'GitHub Actions'],
+    ['gitlab-icon', 'GitLab'], ['bitbucket', 'Bitbucket'], ['azure/azure-devops', 'Azure DevOps'],
     ['jenkins', 'Jenkins'], ['sonarqube', 'SonarQube'],
   ],
   data: [
@@ -88,6 +109,7 @@ export const GROUP_ICONS: Partial<Record<string, string>> = {
   'azure-vnet': 'azure:virtual-networks',
   'azure-subnet': 'azure:subnet',
   'k8s-cluster': 'logos:kubernetes',
+  'k8s-namespace': 'k8s:namespace',
 };
 
 /** Dark-theme variants AWS publishes for some group icons. */
