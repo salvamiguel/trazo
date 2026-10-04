@@ -1,7 +1,7 @@
 export * from './model/types.ts';
 export { loadCalm, validateCalm, TRAZO_NS } from './model/calm.ts';
 export { loadView, projectView, type ViewGraph } from './model/view.ts';
-export { loadWorkspace, MODEL_FILE, type Workspace } from './workspace.ts';
+export { parseWorkspace, type Workspace, type WorkspaceSources } from './workspace-core.ts';
 export { layoutView, ICON_SIZE } from './layout/elk.ts';
 export { measureLayout, type QualityMetrics } from './layout/metrics.ts';
 export type * from './layout/types.ts';

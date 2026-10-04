@@ -1,28 +1,25 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import calmSchema from '../../schemas/calm-1.2/calm.json' with { type: 'json' };
+import coreSchema from '../../schemas/calm-1.2/core.json' with { type: 'json' };
+import interfaceSchema from '../../schemas/calm-1.2/interface.json' with { type: 'json' };
+import controlSchema from '../../schemas/calm-1.2/control.json' with { type: 'json' };
+import flowSchema from '../../schemas/calm-1.2/flow.json' with { type: 'json' };
+import evidenceSchema from '../../schemas/calm-1.2/evidence.json' with { type: 'json' };
+import unitsSchema from '../../schemas/calm-1.2/units.json' with { type: 'json' };
 import { parse as parseYaml } from 'yaml';
 import type { Diagnostic, Element, GroupStyle, Model, Relationship } from './types.ts';
 
 /** Namespace for Trazo-specific fields inside CALM `metadata`. */
 export const TRAZO_NS = 'trazo';
 
-const SCHEMA_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../schemas/calm-1.2');
-const SCHEMA_FILES = ['calm', 'core', 'interface', 'control', 'flow', 'evidence', 'units'];
 
 let validator: ReturnType<Ajv2020['compile']> | undefined;
 
 function getValidator() {
   if (validator) return validator;
   const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false });
-  let root: object | undefined;
-  for (const name of SCHEMA_FILES) {
-    const schema = JSON.parse(readFileSync(join(SCHEMA_DIR, `${name}.json`), 'utf8'));
-    if (name === 'calm') root = schema;
-    else ajv.addSchema(schema);
-  }
-  validator = ajv.compile(root!);
+  for (const schema of [coreSchema, interfaceSchema, controlSchema, flowSchema, evidenceSchema, unitsSchema]) ajv.addSchema(schema);
+  validator = ajv.compile(calmSchema);
   return validator;
 }
 

@@ -1,11 +1,12 @@
-import { createRequire } from 'node:module';
 import { getIconData, iconToSVG, iconToHTML, replaceIDs } from '@iconify/utils';
 import type { IconifyJSON } from '@iconify/types';
 
-const require = createRequire(import.meta.url);
+import logos from '@iconify-json/logos/icons.json' with { type: 'json' };
+import tabler from '@iconify-json/tabler/icons.json' with { type: 'json' };
+
 const sets: Record<string, IconifyJSON> = {
-  logos: require('@iconify-json/logos/icons.json') as IconifyJSON,
-  tabler: require('@iconify-json/tabler/icons.json') as IconifyJSON,
+  logos: logos as IconifyJSON,
+  tabler: tabler as IconifyJSON,
 };
 
 /** Monochrome fallback per CALM node-type when an element has no icon. */

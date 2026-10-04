@@ -1,4 +1,4 @@
-import { createRequire } from 'node:module';
+import ElkBundled from 'elkjs/lib/elk.bundled.js';
 import type { ELK as ElkInstance, ELKConstructorArguments, ElkExtendedEdge, ElkNode, ElkLabel } from 'elkjs/lib/elk-api.js';
 import type { ViewGraph } from '../model/view.ts';
 import type { Direction, Element } from '../model/types.ts';
@@ -9,8 +9,8 @@ import { presetRules } from './presets.ts';
 import { groupBadgeSpace } from '../icons/groups.ts';
 import type { Model } from '../model/types.ts';
 
-// elkjs ships CommonJS; load it explicitly so ESM and the typings agree.
-const ELK = createRequire(import.meta.url)('elkjs/lib/elk.bundled.js') as new (args?: ELKConstructorArguments) => ElkInstance;
+// elkjs ships CommonJS whose typings don't model the default export as a constructor.
+const ELK = ElkBundled as unknown as new (args?: ELKConstructorArguments) => ElkInstance;
 
 export const ICON_SIZE = 56;
 const LABEL_MAX_WIDTH = 150;

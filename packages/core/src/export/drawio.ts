@@ -24,7 +24,14 @@ const r = (n: number) => Math.round(n * 10) / 10;
 
 /** draw.io style strings use `;` as separator, so data URIs go base64 without the `;base64` token. */
 function imageDataUri(svg: string): string {
-  return `data:image/svg+xml,${Buffer.from(svg, 'utf8').toString('base64')}`;
+  return `data:image/svg+xml,${base64(svg)}`;
+}
+
+/** UTF-8 safe base64 that works in Node and in the browser. */
+function base64(text: string): string {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function style(entries: Record<string, string | number | undefined>): string {
