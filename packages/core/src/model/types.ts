@@ -9,6 +9,13 @@ export type GroupStyle =
   | 'aws-subnet-public'
   | 'aws-subnet-private'
   | 'aws-security-group'
+  | 'azure-management-group'
+  | 'azure-subscription'
+  | 'azure-resource-group'
+  | 'azure-region'
+  | 'azure-vnet'
+  | 'azure-subnet'
+  | 'azure-az'
   | 'k8s-cluster'
   | 'k8s-namespace'
   | 'system'
@@ -51,6 +58,16 @@ export interface Model {
 
 export type Direction = 'right' | 'down' | 'left' | 'up';
 
+export type PinSide = 'right-of' | 'left-of' | 'above' | 'below';
+export const PIN_SIDES: PinSide[] = ['right-of', 'left-of', 'above', 'below'];
+
+/** A layout hint from the view: keep `id` on one side of `of`, a sibling in the same group. */
+export interface Pin {
+  id: string;
+  side: PinSide;
+  of: string;
+}
+
 export interface View {
   id: string;
   title?: string;
@@ -59,7 +76,13 @@ export interface View {
   hierarchy: Hierarchy;
   /** Leaf elements to show; ancestors are added automatically. Empty = all. */
   include: string[];
+  /** True when the view has no `include` list and shows every element. */
+  includeAll: boolean;
   direction: Direction;
+  /** `layout.pinned` in the view file. */
+  pins: Pin[];
+  /** `layout.edges`: auto (default), bundled or separate. */
+  edges?: 'auto' | 'bundled' | 'separate';
 }
 
 export interface Diagnostic {

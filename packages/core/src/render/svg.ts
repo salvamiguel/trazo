@@ -73,7 +73,7 @@ export function renderSvg(layout: Layout, model: Model, options: SvgOptions = {}
   for (const g of groups) {
     const el = model.elements.get(g.id)!;
     const tokens = theme.groups[el.groupStyle ?? 'generic'];
-    const badge = groupBadgeSvg(el, tokens.stroke);
+    const badge = groupBadgeSvg(el, tokens.stroke, options.theme === 'dark');
     const badgeMarkup = badge
       ? badge.replace('<svg ', `<svg x="${r(g.x + GROUP_BADGE.inset)}" y="${r(g.y + GROUP_BADGE.inset)}" `)
       : '';
@@ -92,8 +92,9 @@ export function renderSvg(layout: Layout, model: Model, options: SvgOptions = {}
     if (!e.label) continue;
     const l = e.label;
     out.push(
-      `<rect x="${r(l.x)}" y="${r(l.y)}" width="${r(l.width)}" height="${r(l.height)}" rx="3" fill="${theme.edgeLabelBg}" opacity="0.92"/>`,
+      `<g data-label="${esc(e.id)}"><rect x="${r(l.x)}" y="${r(l.y)}" width="${r(l.width)}" height="${r(l.height)}" rx="3" fill="${theme.edgeLabelBg}" opacity="0.92"/>`,
       labelText(l, theme, 'middle'),
+      '</g>',
     );
   }
 

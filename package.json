@@ -7,6 +7,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "render:example": "pnpm --filter @trazo/core exec tsx src/cli.ts render ../../examples/aws-pagos --out ../../out",
-    "build:pages": "rm -rf site && pnpm --filter @trazo/core exec tsx src/cli.ts render ../../examples/aws-pagos --out ../../site/aws-pagos && node scripts/pages-index.mjs"
+    "build:pages": "pnpm --filter @trazo/web build && pnpm --filter @trazo/core exec tsx src/cli.ts render ../../examples/aws-pagos --out ../../site/ejemplos/aws-pagos && pnpm --filter @trazo/core exec tsx src/cli.ts render ../../examples/azure-web --out ../../site/ejemplos/azure-web",
+    "dev": "pnpm --filter @trazo/web dev"
   }
 }

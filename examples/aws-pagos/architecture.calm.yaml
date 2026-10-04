@@ -114,7 +114,7 @@ nodes:
     name: Application Load Balancer
     description: Balanceo hacia EKS
     metadata:
-      trazo: { technology: ALB, icon: aws/elb }
+      trazo: { technology: ALB, icon: aws/alb }
   - unique-id: nat-b
     node-type: service
     name: NAT Gateway
