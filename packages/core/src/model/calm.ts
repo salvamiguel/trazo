@@ -25,7 +25,13 @@ function getValidator() {
 
 /** Validates a parsed document against the official CALM 1.2 meta-schema. */
 export function validateCalm(doc: unknown): Diagnostic[] {
-  const validate = getValidator();
+  let validate: ReturnType<typeof getValidator>;
+  try {
+    validate = getValidator();
+  } catch {
+    // Ajv compiles validators with new Function, which a strict CSP (no 'unsafe-eval') blocks.
+    return [{ level: 'warning', message: 'CALM schema: validación no disponible en este navegador (CSP sin eval)' }];
+  }
   if (validate(doc)) return [];
   return (validate.errors ?? []).map((e) => ({
     level: 'error' as const,
