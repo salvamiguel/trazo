@@ -335,6 +335,55 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .palette li .group { min-width: 84px; color: var(--faint); font-size: 12px; }
 .palette li.empty { color: var(--muted); cursor: default; }
 
+.icon-btn.active { background: var(--accent-soft); color: var(--accent); }
+.primary-btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
+
+/* Version history */
+.history {
+  position: absolute; right: 16px; top: 16px; bottom: 16px; z-index: 5; width: 320px; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden;
+}
+.history > header { display: flex; align-items: flex-start; justify-content: space-between; padding: 12px 10px 6px 14px; }
+.history h2 { margin: 0; font-size: 14px; }
+.history header p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.history-save { display: flex; gap: 6px; padding: 6px 12px 10px; border-bottom: 1px solid var(--border); }
+.history-save.inline { padding: 0; border: 0; flex: 1; }
+.history-save input {
+  flex: 1; min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--fg); font: inherit; font-size: 12px;
+}
+.history-save input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.history-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 8px 12px; }
+.history-list h3 { margin: 12px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.history-empty { margin: 8px; color: var(--muted); font-size: 12px; }
+.history-row { position: relative; border-radius: 8px; }
+.history-pick {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 8px; border: 0; border-radius: 8px; background: none; color: var(--fg); text-align: left;
+}
+.history-row:not(.active) .history-pick:hover { background: var(--hover); }
+.history-row.active { background: var(--accent-soft); }
+.history-dot { flex: none; width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; border: 2px solid var(--faint); background: var(--panel); }
+.history-row.named .history-dot { border-color: var(--accent); background: var(--accent); }
+.history-row.current .history-dot { border-color: var(--ok); background: var(--ok); }
+.history-row.active .history-dot { border-color: var(--accent); }
+.history-main { display: grid; gap: 4px; min-width: 0; }
+.history-main small { color: var(--faint); font-size: 11px; }
+.history-when { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.history-name { font-weight: 600; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.history-reason { font-style: italic; }
+.history-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { padding: 1px 6px; border-radius: 999px; font-size: 11px; line-height: 16px; background: var(--hover); color: var(--muted); }
+.chip.add { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.chip.remove { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.history-actions button { white-space: nowrap; }
+.history-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 0 8px 10px 27px; }
+.preview-banner {
+  position: absolute; left: 76px; right: 352px; top: 16px; width: max-content; max-width: calc(100% - 428px); margin-inline: auto;
+  z-index: 6; display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; white-space: nowrap;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; box-shadow: var(--shadow); color: var(--fg); font-size: 13px;
+}
+.preview-banner > svg { color: var(--accent); flex: none; }
+.preview-banner span { overflow: hidden; text-overflow: ellipsis; }
+
 @media (max-width: 860px) {
   .topbar { grid-template-columns: 1fr auto; height: auto; padding: 8px 12px; row-gap: 8px; }
   .views { grid-column: 1 / -1; grid-row: 2; overflow-x: auto; }
