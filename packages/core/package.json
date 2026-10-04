@@ -1,0 +1,30 @@
+{
+  "name": "@trazo/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Trazo core: CALM model, auto-layout, SVG render and draw.io export",
+  "bin": {
+    "trazo": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@iconify-json/logos": "^1.2.15",
+    "@iconify-json/tabler": "^1.2.41",
+    "@iconify/types": "^2.0.0",
+    "@iconify/utils": "^3.1.7",
+    "ajv": "^8.20.0",
+    "elkjs": "^0.12.0",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "fast-xml-parser": "^5.11.2",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "^5.0.3"
+  }
+}
