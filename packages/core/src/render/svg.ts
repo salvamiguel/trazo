@@ -92,8 +92,9 @@ export function renderSvg(layout: Layout, model: Model, options: SvgOptions = {}
     if (!e.label) continue;
     const l = e.label;
     out.push(
-      `<rect x="${r(l.x)}" y="${r(l.y)}" width="${r(l.width)}" height="${r(l.height)}" rx="3" fill="${theme.edgeLabelBg}" opacity="0.92"/>`,
+      `<g data-label="${esc(e.id)}"><rect x="${r(l.x)}" y="${r(l.y)}" width="${r(l.width)}" height="${r(l.height)}" rx="3" fill="${theme.edgeLabelBg}" opacity="0.92"/>`,
       labelText(l, theme, 'middle'),
+      '</g>',
     );
   }
 

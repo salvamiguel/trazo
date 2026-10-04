@@ -18,9 +18,8 @@ describe.each(ws.views.map((v) => [v.id, v] as const))('view %s', (_id, view) =>
     expect(m.labelOverlaps).toBe(0);
     expect(m.edgesThroughNodes).toBe(0);
     expect(m.misalignedEndpoints).toBe(0);
-    // AZ rows keep model order (A above B) and cross-AZ edges are routed outside ELK, which
-    // costs a few crossings and bends until the obstacle-aware router (libavoid) lands.
-    expect(m.crossings).toBeLessThanOrEqual(4);
+    // Separate and bundled edges are both tried; the cleaner one has no crossings here.
+    expect(m.crossings).toBe(0);
     expect(m.maxBendsPerEdge).toBeLessThanOrEqual(6);
   });
 
@@ -110,5 +109,50 @@ describe('simplifyPolyline', () => {
     expect(out[0]).toEqual({ x: 0, y: 0 });
     expect(out[out.length - 1]).toEqual({ x: 30, y: 40 });
     expect(out.length).toBe(3);
+  });
+});
+
+describe('edge styles', () => {
+  it('bundles edges when that removes crossings, and keeps them separate otherwise', async () => {
+    const infra = ws.views.find((v) => v.id === 'infra-aws')!;
+    const c4 = ws.views.find((v) => v.id === 'contenedores-c4')!;
+    const sharedExits = async (view: typeof infra, edges?: 'separate') => {
+      const { layout } = await layoutModelView(ws.model, edges ? { ...view, edges } : view);
+      const from = layout.edges.filter((e) => e.source === 'payments-api').map((e) => `${e.points[0]!.x},${e.points[0]!.y}`);
+      return new Set(from).size < from.length;
+    };
+    expect(await sharedExits(infra)).toBe(true);
+    expect(await sharedExits(infra, 'separate')).toBe(false);
+    expect(await sharedExits(c4)).toBe(false);
+  });
+});
+
+describe('pinned elements', () => {
+  const dir = join(import.meta.dirname, '../../../examples/aws-pagos');
+  const read = (f: string) => readFileSync(join(dir, f), 'utf8');
+  const withPins = async (pinned: string) => {
+    const view = read('views/infra-aws.view.yaml').replace(/layout:\n/, `layout:\n  pinned:\n${pinned}\n`);
+    const edited = parseWorkspace({ model: read('architecture.calm.yaml'), views: { 'infra-aws': view } });
+    const { layout, graph } = await layoutModelView(edited.model, edited.views[0]!);
+    return { box: (id: string) => layout.nodes.find((n) => n.id === id)!, graph, layout };
+  };
+
+  it('moves an element below a sibling in the same column', async () => {
+    const before = await withPins('    nada: { below: nada }');
+    expect(before.box('waf').y).toBeLessThan(before.box('route53').y);
+    const { box } = await withPins('    waf: { below: route53 }');
+    expect(box('waf').y).toBeGreaterThan(box('route53').y);
+  });
+
+  it('moves an element to the right of a sibling', async () => {
+    const { box, layout } = await withPins('    secretos: { right-of: notificador }');
+    expect(box('secretos').x).toBeGreaterThan(box('notificador').x + box('notificador').width);
+    expect(measureLayout(layout).crossings).toBeLessThanOrEqual(6);
+  });
+
+  it('ignores and reports a pin to an element in another group', async () => {
+    const { graph } = await withPins('    waf: { below: payments-api }');
+    expect(graph.pins).toEqual([]);
+    expect(graph.diagnostics.map((d) => d.message).join()).toContain('own group');
   });
 });

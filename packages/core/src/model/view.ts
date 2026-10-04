@@ -1,5 +1,5 @@
 import { parse as parseYaml } from 'yaml';
-import type { Diagnostic, Direction, Element, Hierarchy, Model, Relationship, View } from './types.ts';
+import { PIN_SIDES, type Diagnostic, type Direction, type Element, type Hierarchy, type Model, type Pin, type PinSide, type Relationship, type View } from './types.ts';
 
 const DIRECTIONS: Direction[] = ['right', 'down', 'left', 'up'];
 const HIERARCHIES: Hierarchy[] = ['deployment', 'composition', 'none'];
@@ -12,6 +12,22 @@ export function loadView(id: string, text: string): { view: View; diagnostics: D
   const hierarchy = (raw.hierarchy as Hierarchy) ?? 'deployment';
   if (!DIRECTIONS.includes(direction)) diagnostics.push({ level: 'error', message: `View ${id}: invalid direction "${direction}"` });
   if (!HIERARCHIES.includes(hierarchy)) diagnostics.push({ level: 'error', message: `View ${id}: invalid hierarchy "${hierarchy}"` });
+  if (layout.edges !== undefined && !['auto', 'bundled', 'separate'].includes(String(layout.edges))) {
+    diagnostics.push({ level: 'warning', message: `View ${id}: layout.edges must be auto, bundled or separate` });
+  }
+  // layout.pinned: { payments-db: { right-of: payments-api } }
+  const pins: Pin[] = [];
+  const pinned = layout.pinned;
+  if (pinned && typeof pinned === 'object') {
+    for (const [el, hint] of Object.entries(pinned as Record<string, unknown>)) {
+      const entry = hint && typeof hint === 'object' ? Object.entries(hint as Record<string, unknown>)[0] : undefined;
+      if (!entry || !PIN_SIDES.includes(entry[0] as PinSide) || typeof entry[1] !== 'string') {
+        diagnostics.push({ level: 'warning', message: `View ${id}: pinned.${el} needs one of ${PIN_SIDES.join(', ')} with an element id` });
+        continue;
+      }
+      pins.push({ id: el, side: entry[0] as PinSide, of: entry[1] });
+    }
+  }
   return {
     view: {
       id,
@@ -22,6 +38,8 @@ export function loadView(id: string, text: string): { view: View; diagnostics: D
       // No list means every element; an explicit empty list is a view that starts empty.
       includeAll: !Array.isArray(raw.include),
       direction,
+      pins,
+      edges: layout.edges === 'bundled' || layout.edges === 'separate' ? layout.edges : undefined,
     },
     diagnostics,
   };
@@ -30,6 +48,8 @@ export function loadView(id: string, text: string): { view: View; diagnostics: D
 /** The slice of the model a view draws, with parents resolved for its hierarchy. */
 export interface ViewGraph {
   elements: Element[];
+  /** Pins that apply here: both ends shown and in the same group. */
+  pins: Pin[];
   /** element id -> parent id inside this view. */
   parent: Map<string, string>;
   /** ids of elements drawn as groups (they have children in this view). */
@@ -80,7 +100,13 @@ export function projectView(model: Model, view: View): ViewGraph {
   const shown = new Set(elements.map((e) => e.id));
 
   const relationships = model.relationships.filter((r) => shown.has(r.source) && shown.has(r.target));
-  return { elements, parent, groups, relationships, diagnostics };
+  const pins = view.pins.filter((pin) => {
+    if (!shown.has(pin.id) || !shown.has(pin.of)) return false;
+    if (parent.get(pin.id) === parent.get(pin.of) && pin.id !== pin.of) return true;
+    diagnostics.push({ level: 'warning', message: `View ${view.id}: ${pin.id} can only be pinned next to an element in its own group, not ${pin.of}` });
+    return false;
+  });
+  return { elements, pins, parent, groups, relationships, diagnostics };
 }
 
 function hasEdges(model: Model, id: string) {

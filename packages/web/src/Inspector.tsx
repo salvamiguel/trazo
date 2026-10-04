@@ -83,6 +83,9 @@ interface ElementProps {
   /** Views of the workspace and whether this element appears in each. */
   views: Array<{ id: string; title: string; all: boolean; shown: boolean }>;
   onToggleView: (viewId: string, shown: boolean) => void;
+  /** Pin of this element in the current view, if any. */
+  pin?: { label: string; of: string };
+  onUnpin: () => void;
   focusName: number;
   onChange: (fields: NodeFields) => void;
   onParent: (parent: string | undefined) => void;
@@ -148,6 +151,17 @@ export function ElementInspector(p: ElementProps) {
           options={[['', 'Nivel superior'], ...p.containers.map((c): [string, string] => [c.id, c.name])]}
           onChange={(v) => p.onParent(v || undefined)}
         />
+        <div className="field">
+          <span>Posición en esta vista</span>
+          {p.pin ? (
+            <div className="pin-row">
+              <span><b>Fijado</b> · {p.pin.label.toLowerCase()} {p.pin.of}</span>
+              <button className="link-btn" onClick={p.onUnpin}>Soltar</button>
+            </div>
+          ) : (
+            <small>Automática. Arrastra el elemento junto a otro de su grupo para fijarlo.</small>
+          )}
+        </div>
         <div className="field">
           <span>Aparece en</span>
           <div className="view-checks">

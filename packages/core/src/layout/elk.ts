@@ -1,11 +1,12 @@
 import ElkBundled from 'elkjs/lib/elk.bundled.js';
 import type { ELK as ElkInstance, ELKConstructorArguments, ElkExtendedEdge, ElkNode, ElkLabel } from 'elkjs/lib/elk-api.js';
 import type { ViewGraph } from '../model/view.ts';
-import type { Direction, Element } from '../model/types.ts';
+import type { Direction, Element, Pin, PinSide } from '../model/types.ts';
 import { FONT, textWidth, wrap } from './text.ts';
 import type { Layout, LabelLine, PlacedEdge, PlacedLabel, PlacedNode, Point } from './types.ts';
 import { simplifyPolyline } from './polyline.ts';
 import { presetRules } from './presets.ts';
+import { measureLayout } from './metrics.ts';
 import { groupBadgeSpace } from '../icons/groups.ts';
 import type { Model } from '../model/types.ts';
 
@@ -18,6 +19,17 @@ const TIE = '__tie:';
 const LABEL_MAX_WIDTH = 150;
 const GROUP_PADDING = { top: 40, left: 20, bottom: 20, right: 20 };
 const OVERLAY_PADDING = { top: 34, side: 14 };
+
+/**
+ * What a pin side means for each layout direction: along the flow (a later or earlier layer)
+ * or across it (earlier or later in the same layer, i.e. above/below when the flow goes right).
+ */
+const PIN_MEANING: Record<Direction, Record<PinSide, 'after' | 'before' | 'next' | 'prev'>> = {
+  right: { 'right-of': 'after', 'left-of': 'before', below: 'next', above: 'prev' },
+  left: { 'right-of': 'before', 'left-of': 'after', below: 'next', above: 'prev' },
+  down: { below: 'after', above: 'before', 'right-of': 'next', 'left-of': 'prev' },
+  up: { below: 'before', above: 'after', 'right-of': 'next', 'left-of': 'prev' },
+};
 
 const ELK_DIRECTION: Record<Direction, string> = { right: 'RIGHT', down: 'DOWN', left: 'LEFT', up: 'UP' };
 const SIDES: Record<Direction, { out: string; in: string }> = {
@@ -55,6 +67,47 @@ export interface LayoutOptions {
   preset?: string;
   /** Needed for preset rules that look at element metadata. */
   model?: Model;
+  /** Pins from the view, already filtered to siblings (see projectView). Defaults to graph.pins. */
+  pins?: Pin[];
+  /**
+   * `separate`: every edge leaves its icon on its own track. `bundled`: edges from one icon
+   * share an exit and branch off a common trunk. `auto` (default): both are laid out and the
+   * cleaner one wins (crossings and overlaps first, then bends).
+   */
+  edges?: EdgeStyle;
+}
+
+export type EdgeStyle = 'auto' | 'bundled' | 'separate';
+
+/** Lays out a view; see `LayoutOptions.edges` for how edge styles are chosen. */
+export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}): Promise<Layout> {
+  const style = options.edges ?? 'auto';
+  if (style !== 'auto') return layoutOnce(graph, options, style === 'bundled');
+  const [separate, bundled] = await Promise.all([layoutOnce(graph, options, false), layoutOnce(graph, options, true)]);
+  const pins = options.pins ?? graph.pins ?? [];
+  return score(bundled, pins) < score(separate, pins) ? bundled : separate;
+}
+
+/** Lower is cleaner. A pin the layout did not honour outweighs everything else. */
+function score(layout: Layout, pins: Pin[]): number {
+  const m = measureLayout(layout);
+  return brokenPins(layout, pins) * 1000 + (m.crossings + m.labelOverlaps + m.edgesThroughNodes + m.misalignedEndpoints) * 10 + m.bends;
+}
+
+function brokenPins(layout: Layout, pins: Pin[]): number {
+  const box = new Map(layout.nodes.map((n) => [n.id, n]));
+  let broken = 0;
+  for (const pin of pins) {
+    const a = box.get(pin.id), b = box.get(pin.of);
+    if (!a || !b) continue;
+    const ok =
+      pin.side === 'right-of' ? a.x >= b.x + b.width
+      : pin.side === 'left-of' ? a.x + a.width <= b.x
+      : pin.side === 'below' ? a.y >= b.y + b.height
+      : a.y + a.height <= b.y;
+    if (!ok) broken++;
+  }
+  return broken;
 }
 
 /**
@@ -62,7 +115,7 @@ export interface LayoutOptions {
  * labels reserved as part of the layout, and edges attached to ports on the icon itself
  * (never to the icon+label box), so arrows always hit the icon on the expected side.
  */
-export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}): Promise<Layout> {
+async function layoutOnce(graph: ViewGraph, options: LayoutOptions, bundle: boolean): Promise<Layout> {
   const direction = options.direction ?? 'right';
   const sides = SIDES[direction];
   const elk = new ELK();
@@ -169,6 +222,9 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
       elkNodes.get(id)!.layoutOptions!['elk.partitioning.partition'] = String(partition);
     }
   }
+  // Position across the flow given to nodes whose in-layer order is fixed (AZ rows, pins).
+  const acrossPos = new Map<string, number>();
+  const across = (v: number) => (direction === 'right' || direction === 'left' ? `(0,${v})` : `(${v},0)`);
   if (rules.overlays.size) {
     // Overlay rows (AZs) must keep their model order in every column, or a frame ends up
     // wrapped around another one. ELK keeps the in-layer order given by elk.position.
@@ -181,7 +237,8 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
       if (rules.overlays.has(e.id)) continue;
       const row = ordered.indexOf(overlayOf(e.id) ?? '');
       if (row >= 0 && rules.overlays.has(graph.parent.get(e.id) ?? '')) {
-        elkNodes.get(e.id)!.layoutOptions!['elk.position'] = `(0,${row * 1000})`;
+        elkNodes.get(e.id)!.layoutOptions!['elk.position'] = across(row * 1000);
+        acrossPos.set(e.id, row * 1000);
       }
     }
   }
@@ -217,7 +274,11 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     edgeLines.set(r.id, lines);
     if (manual.has(r.id)) continue;
     const [from, to] = reversed.has(r.id) ? [r.target, r.source] : [r.source, r.target];
-    const sources = [portFor(elkNodes.get(from)!, `${r.id}__out`, sides.out, graph.groups.has(from))];
+    const sources = [
+      bundle
+        ? sharedPort(elkNodes.get(from)!, sides.out, graph.groups.has(from))
+        : portFor(elkNodes.get(from)!, `${r.id}__out`, sides.out, graph.groups.has(from)),
+    ];
     const targets = [portFor(elkNodes.get(to)!, `${r.id}__in`, sides.in, graph.groups.has(to))];
     const edge: ElkExtendedEdge = {
       id: r.id,
@@ -226,6 +287,29 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
       labels: lines.length ? [{ id: `${r.id}__label`, text, ...measure(lines) }] : [],
     };
     root.edges!.push(edge);
+  }
+
+  // Pins along the flow are invisible ties (`of` → `id` puts id in a later layer); pins across
+  // it move the element next to its sibling in the model order ELK keeps within a layer.
+  for (const pin of options.pins ?? graph.pins ?? []) {
+    const meaning = PIN_MEANING[direction][pin.side];
+    if (rules.overlays.has(pin.id) || rules.overlays.has(pin.of)) continue;
+    if (meaning === 'after' || meaning === 'before') {
+      const [a, b] = meaning === 'after' ? [pin.of, pin.id] : [pin.id, pin.of];
+      const tie = (id: string) => (graph.groups.has(id) ? id : portFor(elkNodes.get(id)!, `${TIE}pin-${pin.id}-${id}`, id === a ? sides.out : sides.in, false));
+      root.edges!.push({ id: `${TIE}pin-${pin.id}`, sources: [tie(a)], targets: [tie(b)] });
+    } else {
+      // ELK keeps the relative order of nodes that carry a position in a semi-interactive graph.
+      const parentId = elkParent(pin.id);
+      (parentId ? elkNodes.get(parentId)! : root).layoutOptions!['elk.layered.crossingMinimization.semiInteractive'] = 'true';
+      const refPos = acrossPos.get(pin.of) ?? 0;
+      const pos = refPos + (meaning === 'next' ? 1 : -1);
+      for (const [id, v] of [[pin.of, refPos], [pin.id, pos]] as const) {
+        const node = elkNodes.get(id)!;
+        node.layoutOptions = { ...node.layoutOptions, 'elk.position': across(v) };
+        acrossPos.set(id, v);
+      }
+    }
   }
 
   // Invisible ties chain the subnets of each AZ in tier order. Without them a subnet whose
@@ -310,6 +394,14 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
   }
 
   return { width: result.width ?? 0, height: result.height ?? 0, nodes, edges };
+}
+
+/** One exit per icon for all its outgoing edges, so ELK draws them as a trunk that branches. */
+function sharedPort(node: ElkNode, side: string, isGroup: boolean): string {
+  if (isGroup) return node.id;
+  const id = `${node.id}__out`;
+  if (!node.ports!.some((p) => p.id === id)) node.ports!.push({ id, width: 1, height: 1, layoutOptions: { 'elk.port.side': side } });
+  return id;
 }
 
 function portFor(node: ElkNode, id: string, side: string, isGroup: boolean): string {

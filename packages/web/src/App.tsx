@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { EditorView, type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
 import { renderSvg, type Point, type ThemeName, type WorkspaceSources } from '@trazo/core';
-import { Canvas, type Selection, type Tool } from './Canvas.tsx';
+import { Canvas, PIN_LABEL, type Selection, type Tool } from './Canvas.tsx';
 import type { CatalogEntry } from './catalog.ts';
 import { CommandPalette, type CommandItem } from './CommandPalette.tsx';
 import {
@@ -15,6 +15,7 @@ import {
   renameView,
   reverseRelationship,
   setInView,
+  setPin,
   setParent,
   updateNode,
   updateRelationship,
@@ -589,6 +590,8 @@ export function App() {
             }}
             onConnectToEmpty={(source, at, group) => { setSelection(undefined); setQuickAdd({ source, at, group }); }}
             onReparent={(id, group) => kind && commit(setParent(sources, id, group, kind))}
+            pins={view?.pins ?? []}
+            onPin={(id, pin) => commit(setPin(sources, viewId, id, pin))}
             onDropEntry={(key, group) => {
               const entry = entryByKey(key);
               if (entry) addEntry(entry, group);
@@ -648,6 +651,11 @@ export function App() {
                 shown: v.includeAll || v.include.includes(selectedElement.id),
               }))}
               onToggleView={(v, shown) => commit(setInView(sources, v, selectedElement.id, shown))}
+              pin={(() => {
+                const pin = view?.pins.find((p) => p.id === selectedElement.id);
+                return pin && { label: PIN_LABEL[pin.side], of: model.elements.get(pin.of)?.name ?? pin.of };
+              })()}
+              onUnpin={() => commit(setPin(sources, viewId, selectedElement.id, undefined))}
               focusName={focusReq.id === selectedElement.id ? focusReq.n : 0}
               onChange={(fields) => commit(updateNode(sources, selectedElement.id, fields))}
               onParent={(p) => kind && commit(setParent(sources, selectedElement.id, p, kind))}

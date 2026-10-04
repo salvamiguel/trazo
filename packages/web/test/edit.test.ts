@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseWorkspace, type WorkspaceSources } from '@trazo/core';
-import { addNode, addRelationship, deleteNode, deleteRelationship, freshViewId, renameView, reverseRelationship, setInView, setParent, updateNode, updateRelationship } from '../src/edit.ts';
+import { addNode, addRelationship, deleteNode, deleteRelationship, freshViewId, renameView, reverseRelationship, setInView, setParent, setPin, updateNode, updateRelationship } from '../src/edit.ts';
 
 const dir = new URL('../../../examples/aws-pagos/', import.meta.url);
 const read = (f: string) => readFileSync(new URL(f, dir), 'utf8');
@@ -107,5 +107,27 @@ describe('views', () => {
   it('renames a view and finds free ids', () => {
     expect(parseWorkspace(renameView(base, 'infra-aws', 'Red de pagos')).views.find((v) => v.id === 'infra-aws')?.title).toBe('Red de pagos');
     expect(freshViewId(base, 'Infra AWS')).toBe('infra-aws-2');
+  });
+});
+
+describe('pins', () => {
+  const sources = { model: 'nodes: []\nrelationships: []\n', views: { v: 'title: V\nlayout:\n  direction: right\n' } };
+
+  it('writes, replaces and removes layout.pinned in the view', () => {
+    let s = setPin(sources, 'v', 'b', { side: 'below', of: 'a' });
+    expect(s.views.v).toBe('title: V\nlayout:\n  direction: right\n  pinned:\n    b: { below: a }\n');
+    s = setPin(s, 'v', 'b', { side: 'right-of', of: 'c' });
+    expect(s.views.v).toContain('b: { right-of: c }');
+    s = setPin(s, 'v', 'b', undefined);
+    expect(s.views.v).toBe(sources.views.v);
+  });
+
+  it('drops pins that mention a deleted element', () => {
+    const model = 'nodes:\n  - unique-id: a\n    node-type: service\n    name: A\n    description: ""\nrelationships: []\n';
+    let s = setPin({ ...sources, model }, 'v', 'b', { side: 'below', of: 'a' });
+    s = setPin(s, 'v', 'c', { side: 'above', of: 'd' });
+    const after = deleteNode(s, 'a');
+    expect(after.views.v).not.toContain('b:');
+    expect(after.views.v).toContain('c: { above: d }');
   });
 });

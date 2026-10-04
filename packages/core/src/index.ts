@@ -2,7 +2,7 @@ export * from './model/types.ts';
 export { loadCalm, validateCalm, TRAZO_NS } from './model/calm.ts';
 export { loadView, projectView, type ViewGraph } from './model/view.ts';
 export { parseWorkspace, type Workspace, type WorkspaceSources } from './workspace-core.ts';
-export { layoutView, ICON_SIZE } from './layout/elk.ts';
+export { layoutView, ICON_SIZE, type EdgeStyle } from './layout/elk.ts';
 export { measureLayout, type QualityMetrics } from './layout/metrics.ts';
 export type * from './layout/types.ts';
 export { renderSvg } from './render/svg.ts';
@@ -33,6 +33,6 @@ import type { Model, View } from './model/types.ts';
 export async function layoutModelView(model: Model, view: View) {
   await ensureModelIcons(model);
   const graph = projectView(model, view);
-  const layout = await layoutView(graph, { direction: view.direction, preset: view.preset, model });
+  const layout = await layoutView(graph, { direction: view.direction, preset: view.preset, model, edges: view.edges });
   return { graph, layout };
 }

@@ -3,7 +3,7 @@
  * the user can read, diff and commit. The yaml Document API keeps comments and styles.
  */
 import { isMap, isSeq, parseDocument, type Document, YAMLMap, YAMLSeq } from 'yaml';
-import type { GroupStyle, Hierarchy, WorkspaceSources } from '@trazo/core';
+import type { GroupStyle, Hierarchy, PinSide, WorkspaceSources } from '@trazo/core';
 
 export const NODE_TYPES = ['actor', 'system', 'service', 'database', 'network', 'webclient', 'data-asset', 'ecosystem', 'ldap'] as const;
 export const PROTOCOLS = ['HTTP', 'HTTPS', 'JDBC', 'AMQP', 'TCP', 'TLS', 'mTLS', 'WebSocket', 'SocketIO', 'LDAP', 'FTP', 'SFTP'] as const;
@@ -231,7 +231,8 @@ export function setParent(sources: WorkspaceSources, id: string, parent: string 
   if (parentOf(doc, id, kind) === parent) return sources;
   detach(doc, id, kind);
   if (parent) attach(doc, [id], parent, kind);
-  return { ...sources, model: print(doc) };
+  // Pins only hold between siblings, so the ones involving a moved element no longer apply.
+  return { model: print(doc), views: mapViews(sources.views, (text) => dropPins(text, id)) };
 }
 
 /** Connects two elements: `interacts` when the source is an actor, `connects` otherwise. */
@@ -331,7 +332,7 @@ export function deleteNode(sources: WorkspaceSources, id: string): WorkspaceSour
     }
   }
 
-  const views = Object.fromEntries(Object.entries(sources.views).map(([v, text]) => [v, excludeFromView(text, id)]));
+  const views = mapViews(sources.views, (text) => dropPins(excludeFromView(text, id), id));
   return { model: print(doc), views };
 }
 
@@ -375,4 +376,46 @@ export function freshViewId(sources: WorkspaceSources, title: string): string {
   const root = slug(title);
   if (!(root in sources.views)) return root;
   for (let i = 2; ; i++) if (!(`${root}-${i}` in sources.views)) return `${root}-${i}`;
+}
+
+const mapViews = (views: Record<string, string>, fn: (text: string) => string) =>
+  Object.fromEntries(Object.entries(views).map(([v, text]) => [v, fn(text)]));
+
+/** Removes the pin of `id` and every pin that refers to it. */
+function dropPins(text: string, id: string): string {
+  const doc = parseDocument(text);
+  const pinned = doc.getIn(['layout', 'pinned']);
+  if (!isMap(pinned)) return text;
+  const before = pinned.items.length;
+  pinned.items = pinned.items.filter((pair) => {
+    const key = String((pair.key as { value?: unknown })?.value ?? pair.key);
+    const hint = pair.value;
+    const refersTo = isMap(hint) && hint.items.some((h) => String((h.value as { value?: unknown })?.value ?? h.value) === id);
+    return key !== id && !refersTo;
+  });
+  if (pinned.items.length === before) return text;
+  if (pinned.items.length === 0) doc.deleteIn(['layout', 'pinned']);
+  return print(doc);
+}
+
+/** Pins an element next to a sibling in one view (`layout.pinned`), or unpins it. */
+export function setPin(sources: WorkspaceSources, viewId: string, id: string, pin: { side: PinSide; of: string } | undefined): WorkspaceSources {
+  const text = sources.views[viewId];
+  if (text === undefined) return sources;
+  const doc = parseDocument(text);
+  if (!pin) {
+    if (!doc.hasIn(['layout', 'pinned', id])) return sources;
+    doc.deleteIn(['layout', 'pinned', id]);
+    const rest = doc.getIn(['layout', 'pinned']);
+    if (isMap(rest) && rest.items.length === 0) doc.deleteIn(['layout', 'pinned']);
+  } else {
+    if (!isMap(doc.get('layout'))) doc.set('layout', doc.createNode({}));
+    const layout = doc.get('layout') as YAMLMap;
+    layout.flow = false;
+    if (!isMap(layout.get('pinned'))) layout.set('pinned', doc.createNode({}));
+    const hint = doc.createNode({ [pin.side]: pin.of }) as YAMLMap;
+    hint.flow = true;
+    (layout.get('pinned') as YAMLMap).set(id, hint);
+  }
+  return { ...sources, views: { ...sources.views, [viewId]: print(doc) } };
 }

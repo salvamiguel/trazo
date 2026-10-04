@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Layout, PlacedEdge, PlacedNode, Point } from '@trazo/core';
+import type { Layout, Pin, PinSide, PlacedEdge, PlacedNode, Point } from '@trazo/core';
 import { DRAG_TYPE } from './Library.tsx';
 import { Fit, Minus, Plus } from './icons.tsx';
 
@@ -22,6 +22,10 @@ interface Props {
   /** A connection dropped on empty space: the app asks what to create there. */
   onConnectToEmpty: (source: string, screen: Point, group: string | undefined) => void;
   onReparent: (id: string, group: string | undefined) => void;
+  /** Pins of the current view, marked on the canvas. */
+  pins: Pin[];
+  /** An element dropped inside its own group: keep it on that side of the nearest sibling. */
+  onPin: (id: string, pin: { side: PinSide; of: string }) => void;
   onDropEntry: (key: string, group: string | undefined) => void;
 }
 
@@ -40,6 +44,8 @@ interface Live {
   /** Element the gesture would land on (connect target or group). */
   target?: string;
   dragging?: string;
+  /** While dragging inside the element's own group: where it would be pinned. */
+  pin?: { side: PinSide; of: string };
   connecting?: string;
   hover?: string;
 }
@@ -60,6 +66,13 @@ function segDistance(p: Point, a: Point, b: Point) {
   const t = dx || dy ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy))) : 0;
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
+
+export const PIN_LABEL: Record<PinSide, string> = {
+  'right-of': 'A la derecha de',
+  'left-of': 'A la izquierda de',
+  above: 'Encima de',
+  below: 'Debajo de',
+};
 
 function handleOf(n: PlacedNode): Point {
   return n.isGroup ? { x: n.x + n.width, y: n.y + n.height / 2 } : { x: n.x + n.width + 14, y: n.y + n.height / 2 };
@@ -157,6 +170,30 @@ export function Canvas(props: Props) {
     return Math.hypot(p.x - h.x, p.y - h.y) <= (HANDLE_R + 4) / viewRef.current.k;
   };
 
+  /** Side of the nearest sibling the pointer is on, for a drag that stays in the same group. */
+  const pinAt = (p: Point, id: string): Live['pin'] => {
+    const self = byId.get(id);
+    if (!self || inside(p, outline(self))) return undefined;
+    let best: { n: PlacedNode; d: number } | undefined;
+    for (const n of layout?.nodes ?? []) {
+      if (n.id === id || n.parent !== self.parent) continue;
+      const b = outline(n);
+      const d = Math.hypot(Math.max(b.x - p.x, 0, p.x - b.x - b.width), Math.max(b.y - p.y, 0, p.y - b.y - b.height));
+      if (!best || d < best.d) best = { n, d };
+    }
+    if (!best) return undefined;
+    const b = outline(best.n);
+    const dx = (p.x - (b.x + b.width / 2)) / (b.width / 2 + 30), dy = (p.y - (b.y + b.height / 2)) / (b.height / 2 + 30);
+    const side: PinSide = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right-of' : 'left-of') : dy > 0 ? 'below' : 'above';
+    return { side, of: best.n.id };
+  };
+  /** Reparenting wins when the pointer is over another group; otherwise the drop pins. */
+  const dropFor = (p: Point, id: string): Pick<Live, 'target' | 'pin'> => {
+    const target = canNest ? groupAt(p, id)?.id : byId.get(id)?.parent;
+    if (target !== byId.get(id)?.parent) return { target };
+    return { pin: pinAt(p, id) };
+  };
+
   // ---- Gestures --------------------------------------------------------------------------
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 || !layout) return;
@@ -209,9 +246,8 @@ export function Canvas(props: Props) {
     if (!p) return;
     if (g.kind === 'node') {
       if (!g.moved && Math.hypot(e.clientX - g.start.x, e.clientY - g.start.y) < 4) return;
-      if (!canNest) return;
       g.moved = true;
-      setLive({ dragging: g.id, at: p, target: groupAt(p, g.id)?.id });
+      setLive({ dragging: g.id, at: p, ...dropFor(p, g.id) });
       return;
     }
     const over = nodeAt(p);
@@ -230,8 +266,9 @@ export function Canvas(props: Props) {
     }
     if (g.kind === 'node') {
       if (!g.moved) return props.onSelect({ kind: 'node', id: g.id });
-      const target = groupAt(p, g.id)?.id;
-      if (target !== byId.get(g.id)?.parent) props.onReparent(g.id, target);
+      const drop = dropFor(p, g.id);
+      if (drop.pin) props.onPin(g.id, drop.pin);
+      else if (canNest && drop.target !== byId.get(g.id)?.parent) props.onReparent(g.id, drop.target);
       return;
     }
     const over = nodeAt(p);
@@ -241,6 +278,53 @@ export function Canvas(props: Props) {
       props.onConnectToEmpty(g.from, { x: e.clientX - box.left, y: e.clientY - box.top }, groupAt(p)?.id);
     }
   };
+
+  // ---- Animated layout changes ---------------------------------------------------------------
+  // Each new layout replaces the SVG; nodes then glide from where they were (FLIP) and edges,
+  // which are re-routed, fade back in. A new view or reduced motion just swaps the picture.
+  const previous = useRef<{ key: string; boxes: Map<string, { x: number; y: number; width: number; height: number }> } | undefined>(undefined);
+  useLayoutEffect(() => {
+    const root = content.current;
+    if (!root || !layout) return;
+    const prev = previous.current;
+    previous.current = { key: fitKey, boxes: new Map(layout.nodes.map((n) => [n.id, { x: n.x, y: n.y, width: n.width, height: n.height }])) };
+    if (!prev || prev.key !== fitKey || typeof root.animate !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const timing = { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' };
+    let changed = false;
+    for (const n of layout.nodes) {
+      const el = root.querySelector<SVGGElement>(`g[data-id="${CSS.escape(n.id)}"]`);
+      if (!el) continue;
+      const old = prev.boxes.get(n.id);
+      if (!old) {
+        el.animate([{ opacity: 0 }, { opacity: 1 }], { ...timing, delay: 120, fill: 'backwards' });
+        changed = true;
+        continue;
+      }
+      const dx = old.x - n.x, dy = old.y - n.y;
+      const resized = old.width !== n.width || old.height !== n.height;
+      if (!dx && !dy && !resized) continue;
+      changed = true;
+      const glide = [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }];
+      if (!n.isGroup) {
+        el.animate(glide, timing);
+        continue;
+      }
+      // Group frames grow or shrink in place; their title and badge glide with the corner.
+      const [frame, ...rest] = Array.from(el.children) as SVGElement[];
+      frame?.animate(
+        [
+          { x: `${old.x}px`, y: `${old.y}px`, width: `${old.width}px`, height: `${old.height}px` },
+          { x: `${n.x}px`, y: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` },
+        ],
+        timing,
+      );
+      for (const child of rest) child.animate(glide, timing);
+    }
+    if (!changed) return;
+    for (const el of root.querySelectorAll<SVGElement>('path[data-id], g[data-label]')) {
+      el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, delay: 220, easing: 'ease-out', fill: 'backwards' });
+    }
+  }, [svg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const k = view.k;
@@ -255,6 +339,35 @@ export function Canvas(props: Props) {
         const b = outline(n);
         return <rect className="ov-target" x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8} rx={10} strokeWidth={2 / k} />;
       })()}
+      {live.pin && (() => {
+        const n = byId.get(live.pin.of);
+        if (!n) return null;
+        const b = outline(n);
+        const gap = 10;
+        const bar =
+          live.pin.side === 'right-of' ? { x1: b.x + b.width + gap, y1: b.y, x2: b.x + b.width + gap, y2: b.y + b.height }
+          : live.pin.side === 'left-of' ? { x1: b.x - gap, y1: b.y, x2: b.x - gap, y2: b.y + b.height }
+          : live.pin.side === 'above' ? { x1: b.x, y1: b.y - gap, x2: b.x + b.width, y2: b.y - gap }
+          : { x1: b.x, y1: b.y + b.height + gap, x2: b.x + b.width, y2: b.y + b.height + gap };
+        return (
+          <>
+            <rect className="ov-pin-ref" x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8} rx={10} strokeWidth={1.5 / k} />
+            <line className="ov-pin-bar" {...bar} strokeWidth={4 / k} />
+          </>
+        );
+      })()}
+      {props.pins.map((pin) => {
+        const n = byId.get(pin.id);
+        if (!n || live.dragging === pin.id) return null;
+        return (
+          <g key={pin.id} className="ov-pinned" transform={`translate(${n.isGroup ? n.x + n.width : n.x + n.width + 2} ${n.y - 2}) scale(${Math.min(1.6, 1 / k)})`}>
+            <title>{`${PIN_LABEL[pin.side]} ${byId.get(pin.of)?.label.lines[0]?.text ?? pin.of}`}</title>
+            <circle r={7} />
+            <path className="head" d="M-2.6 -3.8h5.2l-0.9 2.8h-3.4z" />
+            <path d="M-3.4 -1h6.8M0 -1v4.6" />
+          </g>
+        );
+      })}
       {selection?.kind === 'edge' && (() => {
         const edge = layout.edges.find((e) => e.id === selection.id);
         return edge ? <polyline className="ov-edge" points={edge.points.map((q) => `${q.x},${q.y}`).join(' ')} strokeWidth={4 / k} /> : null;
@@ -276,7 +389,17 @@ export function Canvas(props: Props) {
         const n = byId.get(live.dragging);
         if (!n) return null;
         const w = n.isGroup ? Math.min(n.width, 220) : n.width, h = n.isGroup ? 34 : n.height;
-        return <rect className="ov-ghost" x={live.at.x - w / 2} y={live.at.y - h / 2} width={w} height={h} rx={12} strokeWidth={1.5 / k} />;
+        const ref = live.pin ? byId.get(live.pin.of)?.label.lines[0]?.text : undefined;
+        return (
+          <>
+            <rect className="ov-ghost" x={live.at.x - w / 2} y={live.at.y - h / 2} width={w} height={h} rx={12} strokeWidth={1.5 / k} />
+            {live.pin && ref && (
+              <g transform={`translate(${live.at.x} ${live.at.y + h / 2 + 8}) scale(${1 / k})`}>
+                <text className="ov-pin-text" y={12} textAnchor="middle">{`${PIN_LABEL[live.pin.side]} ${ref}`}</text>
+              </g>
+            )}
+          </>
+        );
       })()}
       {live.connecting && live.at && (() => {
         const n = byId.get(live.connecting);
