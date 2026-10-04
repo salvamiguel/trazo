@@ -13,6 +13,8 @@ interface Props {
   fitKey: string;
   busy: boolean;
   tool: Tool;
+  /** Showing an earlier version: pan and zoom only. */
+  readOnly?: boolean;
   selection?: Selection;
   /** Whether the view nests elements (false when its hierarchy is "none"). */
   canNest: boolean;
@@ -80,7 +82,7 @@ function handleOf(n: PlacedNode): Point {
 
 /** Pan and zoom over the rendered SVG, plus the editing gestures drawn on an overlay. */
 export function Canvas(props: Props) {
-  const { svg, layout, fitKey, busy, tool, selection, canNest } = props;
+  const { svg, layout, fitKey, busy, tool, selection, canNest, readOnly } = props;
   const host = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
@@ -199,6 +201,10 @@ export function Canvas(props: Props) {
     if (e.button !== 0 || !layout) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = toDiagram(e.clientX, e.clientY);
+    if (readOnly) {
+      gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: false };
+      return;
+    }
     if (onHandle(p) && selectedNode) {
       gesture.current = { kind: 'connect', from: selectedNode.id };
       setLive({ connecting: selectedNode.id, at: p });
@@ -227,7 +233,7 @@ export function Canvas(props: Props) {
     const g = gesture.current;
     const p = layout && host.current ? toDiagram(e.clientX, e.clientY) : undefined;
     if (!g) {
-      if (p) {
+      if (p && !readOnly) {
         const hover = onHandle(p) ? '__handle' : (nodeAt(p)?.id ?? (edgeAt(p) ? '__edge' : undefined));
         if (hover !== live.hover) setLive({ hover });
       }
@@ -422,12 +428,12 @@ export function Canvas(props: Props) {
       onPointerUp={onPointerUp}
       onPointerLeave={() => !gesture.current && live.hover && setLive({})}
       onDoubleClick={(e) => {
-        if (!layout) return;
+        if (!layout || readOnly) return;
         const n = nodeAt(toDiagram(e.clientX, e.clientY));
         if (n) props.onOpen(n.id);
       }}
       onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes(DRAG_TYPE) || !layout) return;
+        if (!e.dataTransfer.types.includes(DRAG_TYPE) || !layout || readOnly) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
         const g = canNest ? groupAt(toDiagram(e.clientX, e.clientY))?.id ?? null : null;

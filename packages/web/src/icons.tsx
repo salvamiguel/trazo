@@ -33,3 +33,5 @@ export const ChevronDown = ({ size }: P) => (<svg {...base(size)}><path d="M6 9l
 export const Folder = ({ size }: P) => (<svg {...base(size)}><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /></svg>);
 export const Dots = ({ size }: P) => (<svg {...base(size)}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>);
 export const Eye = ({ size }: P) => (<svg {...base(size)}><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>);
+export const History = ({ size }: P) => (<svg {...base(size)}><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>);
+export const Image = ({ size }: P) => (<svg {...base(size)}><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M20.5 16l-5-5-9 8.5" /></svg>);

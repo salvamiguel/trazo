@@ -20,4 +20,14 @@ describe('catalog', () => {
     expect(azureDb.length).toBeGreaterThan(5);
     expect(azureDb.every((e) => e.icon?.startsWith('azure/'))).toBe(true);
   });
+
+  it('finds Kubernetes kinds and controllers once, by kubectl short name or category', async () => {
+    const index = await iconIndex();
+    const pvc = searchCatalog('pvc', index).map((e) => e.label);
+    expect(pvc).toEqual(['PVC']);
+    expect(searchCatalog('eks', index).map((e) => e.key)).not.toContain('aws:elastic-kubernetes-service');
+    expect(searchCatalog('service mesh', index).map((e) => e.label)).toEqual(expect.arrayContaining(['Istio', 'Linkerd', 'Envoy']));
+    expect(searchCatalog('chaos mesh', index)[0]?.icon).toBe('cncf/chaosmesh');
+    expect(searchCatalog('bitbucket')[0]?.label).toBe('Bitbucket');
+  });
 });

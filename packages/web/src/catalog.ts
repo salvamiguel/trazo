@@ -48,7 +48,6 @@ export const GROUP_STYLES: Array<[GroupStyle, string, nodeType: string]> = [
 const GROUP_PREVIEW: Partial<Record<GroupStyle, string>> = {
   'aws-az': 'tabler:layout-rows',
   'azure-az': 'tabler:layout-rows',
-  'k8s-namespace': 'tabler:folder',
   system: 'tabler:box-margin',
   generic: 'tabler:square-dashed',
 };
@@ -94,7 +93,8 @@ export const SECTIONS: CatalogSection[] = [
   { id: 'groups-aws', title: 'Grupos AWS', entries: groups('aws-') },
   { id: 'azure', title: 'Azure', entries: CURATED.azure.map(icon) },
   { id: 'groups-azure', title: 'Grupos Azure', entries: groups('azure-') },
-  { id: 'k8s', title: 'Kubernetes y CNCF', entries: CURATED.k8s.map(icon) },
+  { id: 'k8s', title: 'Kubernetes', entries: CURATED.k8s.map(icon) },
+  { id: 'cncf', title: 'Controladores y CNCF', entries: CURATED.cncf.map(icon) },
   { id: 'ai', title: 'IA', entries: CURATED.ai.map(icon) },
   { id: 'iac', title: 'IaC y DevOps', entries: CURATED.iac.map(icon) },
   { id: 'data', title: 'Datos y mensajería', entries: CURATED.data.map(icon) },
@@ -105,8 +105,9 @@ const curated = SECTIONS.flatMap((s) => s.entries);
 const curatedKeys = new Set(curated.map((e) => e.key));
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
-const PACK: Record<string, string> = { aws: 'AWS', azure: 'Azure', logos: 'Logo', tabler: 'Glifo' };
+const PACK: Record<string, string> = { aws: 'AWS', azure: 'Azure', k8s: 'Kubernetes', cncf: 'Cloud native', logos: 'Logo', tabler: 'Glifo' };
 const NODE_TYPE_BY_CATEGORY: Record<string, string> = {
+  Almacenamiento: 'data-asset',
   Database: 'database',
   Databases: 'database',
   Storage: 'data-asset',
@@ -127,14 +128,30 @@ let builtFrom: IconIndex | undefined;
 /** Every icon of every pack as a searchable entry, built once the index has loaded. */
 function everything(index: IconIndex | undefined): Searchable[] {
   if (searchable && builtFrom === index) return searchable;
-  const list: Searchable[] = curated.map((entry) => ({ entry, hay: norm(`${entry.label} ${entry.preview} ${entry.icon ?? ''}`), rank: 100 }));
+  // Curated entries may use a short alias (aws:eks, k8s:pvc): map those to the indexed icon.
+  const indexed = new Map<string, { title: string; category: string; aliases: string[] }>();
   for (const [prefix, set] of Object.entries(index ?? {})) {
-    const aliasesOf = new Map<string, string[]>();
-    for (const [alias, target] of Object.entries(set.aliases)) aliasesOf.set(target, [...(aliasesOf.get(target) ?? []), alias]);
-    const official = prefix === 'aws' || prefix === 'azure';
+    for (const [name, [title, category]] of Object.entries(set.icons)) indexed.set(`${prefix}:${name}`, { title, category, aliases: [] });
+    for (const [alias, target] of Object.entries(set.aliases)) {
+      const t = indexed.get(`${prefix}:${target}`);
+      if (!t) continue;
+      t.aliases.push(alias);
+      indexed.set(`${prefix}:${alias}`, t);
+    }
+  }
+  const covered = new Set<object>();
+  const list: Searchable[] = curated.map((entry) => {
+    const meta = indexed.get(entry.key);
+    if (meta) covered.add(meta);
+    const extra = meta ? `${meta.title} ${meta.category} ${meta.aliases.join(' ')}` : '';
+    return { entry, hay: norm(`${entry.label} ${entry.preview} ${entry.icon ?? ''} ${extra}`), rank: 100 };
+  });
+  for (const [prefix, set] of Object.entries(index ?? {})) {
+    const official = prefix === 'aws' || prefix === 'azure' || prefix === 'k8s' || prefix === 'cncf';
     for (const [name, [title, category]] of Object.entries(set.icons)) {
       const id = `${prefix}:${name}`;
-      if (curatedKeys.has(id)) continue;
+      const meta = indexed.get(id)!;
+      if (curatedKeys.has(id) || covered.has(meta)) continue;
       // Tiles are narrow: "Amazon SageMaker Canvas" shows as "SageMaker Canvas" (full name in the tooltip).
       const label = prefix === 'logos' ? title.replace(/ icon$/, '') : prefix === 'aws' ? title.replace(/^(Amazon|AWS) /, '') : title;
       const ref = official ? `${prefix}/${name}` : id;
@@ -148,7 +165,7 @@ function everything(index: IconIndex | undefined): Searchable[] {
           technology: prefix === 'tabler' ? undefined : label,
           hint: [title !== label ? title : '', PACK[prefix] ?? prefix, category].filter(Boolean).join(' · '),
         },
-        hay: norm(`${title} ${name} ${(aliasesOf.get(name) ?? []).join(' ')} ${PACK[prefix] ?? ''} ${prefix} ${category}`),
+        hay: norm(`${title} ${name} ${meta.aliases.join(' ')} ${PACK[prefix] ?? ''} ${prefix} ${category}`),
         rank: official ? 15 : prefix === 'logos' ? 10 : 0,
       });
     }

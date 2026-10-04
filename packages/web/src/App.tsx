@@ -34,7 +34,10 @@ import {
   type DirHandle,
   type OpenedFolder,
 } from './folder.ts';
-import { Alert, Check, Command, Connect, Dots, Download, Folder, Logo, Moon, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
+import { Alert, Check, Command, Connect, Dots, Download, Folder, History, Logo, Moon, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
+import * as history from './history.ts';
+import { HistoryPanel, versionTime } from './HistoryPanel.tsx';
+import { svgToPng } from './png.ts';
 import { ElementInspector, RelationshipInspector } from './Inspector.tsx';
 import { entryByKey, Library, Picker } from './Library.tsx';
 import { TEMPLATES, viewYaml } from './templates.ts';
@@ -62,8 +65,8 @@ function save(key: string, value: unknown) {
   }
 }
 
-function download(name: string, content: string, type: string) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
+function download(name: string, content: string | Blob, type: string) {
+  const url = URL.createObjectURL(typeof content === 'string' ? new Blob([content], { type }) : content);
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -140,6 +143,9 @@ export function App() {
   const [focusReq, setFocusReq] = useState<{ id?: string; n: number }>({ n: 0 });
   const focusName = (id: string) => setFocusReq((r) => ({ id, n: r.n + 1 }));
   const [quickAdd, setQuickAdd] = useState<{ source: string; at: Point; group?: string }>();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  /** An earlier version shown read-only on the canvas and in the editor. */
+  const [preview, setPreview] = useState<history.Version>();
   const editor = useRef<ReactCodeMirrorRef>(null);
   const stage = useRef<HTMLElement>(null);
 
@@ -149,7 +155,8 @@ export function App() {
   const past = useRef<WorkspaceSources[]>([]);
   const future = useRef<WorkspaceSources[]>([]);
 
-  const diagram = useDiagram(sources, viewId, theme);
+  const shown = preview?.sources ?? sources;
+  const diagram = useDiagram(shown, viewId, theme);
   const model = diagram.workspace.model;
   const view = diagram.workspace.views.find((v) => v.id === viewId);
   const hierarchy = view?.hierarchy ?? 'deployment';
@@ -169,6 +176,7 @@ export function App() {
     const t = setTimeout(async () => {
       store.saveSources(wsId, sources);
       setWorkspaces(store.listWorkspaces());
+      void history.snapshot(wsId, sources);
       if (link?.ok) {
         try {
           await writeFolder(link.handle, sources, link.modelFile);
@@ -225,7 +233,7 @@ export function App() {
     return () => clearTimeout(t);
   }, [selection, model, diagram.busy]);
 
-  const editorText = tab === 'model' ? sources.model : (sources.views[viewId] ?? '');
+  const editorText = tab === 'model' ? shown.model : (shown.views[viewId] ?? '');
   const onEdit = useCallback(
     (text: string) =>
       setSources((s) => (tab === 'model' ? { ...s, model: text } : { ...s, views: { ...s.views, [viewId]: text } })),
@@ -297,6 +305,10 @@ export function App() {
       }
       if (typing() || paletteOpen || dialog) return;
       const key = e.key.toLowerCase();
+      if (preview) {
+        if (e.key === 'Escape') setPreview(undefined);
+        return;
+      }
       if (mod && key === 'z') {
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -336,6 +348,8 @@ export function App() {
     const loaded = next ?? store.loadSources(id);
     if (!loaded) return;
     store.saveSources(wsId, current.current);
+    void history.snapshot(wsId, current.current, { reason: 'before-switch', force: true });
+    setPreview(undefined);
     store.setActiveWorkspace(id);
     past.current = [];
     future.current = [];
@@ -405,14 +419,53 @@ export function App() {
 
   const activeMeta = workspaces.find((w) => w.id === wsId) ?? workspaces[0]!;
 
+  // ---- Version history -----------------------------------------------------------------------
+  const openHistory = () => {
+    setHistoryOpen(true);
+    setSelection(undefined);
+    setLibraryOpen(false);
+  };
+  const closeHistory = () => {
+    setHistoryOpen(false);
+    setPreview(undefined);
+  };
+  const previewVersion = (v: history.Version | undefined) => {
+    setPreview(v);
+    setSelection(undefined);
+    setQuickAdd(undefined);
+    setTool('select');
+  };
+  /** Restoring is an edit like any other: the state it replaces is kept as a version and ⌘Z undoes it. */
+  const restore = async (v: history.Version) => {
+    await history.snapshot(wsId, current.current, { reason: 'before-restore', force: true });
+    commit(v.sources);
+    setPreview(undefined);
+  };
+  const saveNamed = (name: string) => {
+    store.saveSources(wsId, current.current);
+    void history.snapshot(wsId, current.current, { name });
+  };
+
+  const exportPng = async (t: ThemeName) => {
+    if (!diagram.layout) return;
+    try {
+      const svg = renderSvg(diagram.layout, diagram.layoutModel ?? model, { theme: t });
+      download(`${viewId}.${t}.png`, await svgToPng(svg), 'image/png');
+    } catch (err) {
+      fail(err);
+    }
+  };
+
   const exports = useMemo(
     () => [
       { id: 'svg-light', label: 'SVG claro', run: () => diagram.layout && download(`${viewId}.light.svg`, renderSvg(diagram.layout, diagram.layoutModel ?? model, { theme: 'light' }), 'image/svg+xml') },
       { id: 'svg-dark', label: 'SVG oscuro', run: () => diagram.layout && download(`${viewId}.dark.svg`, renderSvg(diagram.layout, diagram.layoutModel ?? model, { theme: 'dark' }), 'image/svg+xml') },
+      { id: 'png-light', label: 'PNG claro', run: () => void exportPng('light') },
+      { id: 'png-dark', label: 'PNG oscuro', run: () => void exportPng('dark') },
       { id: 'drawio', label: 'draw.io (.drawio)', run: () => { const x = drawioFor(diagram, view?.title ?? viewId); if (x) download(`${viewId}.drawio`, x, 'application/xml'); } },
-      { id: 'calm', label: 'Modelo CALM (.yaml)', run: () => download('architecture.calm.yaml', sources.model, 'application/yaml') },
+      { id: 'calm', label: 'Modelo CALM (.yaml)', run: () => download('architecture.calm.yaml', shown.model, 'application/yaml') },
     ],
-    [diagram, viewId, view, sources.model],
+    [diagram, viewId, view, shown.model],
   );
 
   const commands: CommandItem[] = [
@@ -421,6 +474,8 @@ export function App() {
     { id: 'undo', group: 'Dibujar', label: 'Deshacer', run: undo },
     { id: 'redo', group: 'Dibujar', label: 'Rehacer', run: redo },
     ...viewIds.map((id) => ({ id: `view-${id}`, group: 'Vistas', label: `Ir a ${titleOf(sources.views[id]) ?? id}`, run: () => setViewId(id) })),
+    { id: 'history', group: 'Historial', label: 'Ver historial de versiones', run: openHistory },
+    { id: 'save-version', group: 'Historial', label: 'Guardar versión con nombre…', run: openHistory },
     { id: 'theme', group: 'Apariencia', label: theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro', run: () => setTheme(theme === 'dark' ? 'light' : 'dark') },
     { id: 'tab-model', group: 'Editor', label: 'Editar el modelo CALM', run: () => setTab('model') },
     { id: 'tab-view', group: 'Editor', label: 'Editar la vista actual', run: () => setTab('view') },
@@ -507,6 +562,9 @@ export function App() {
           <button className="ghost-btn" onClick={() => setPaletteOpen(true)} title="Paleta de comandos">
             <Command size={14} /> <span className="kbd">⌘K</span>
           </button>
+          <button className={`icon-btn${historyOpen ? ' active' : ''}`} onClick={() => (historyOpen ? closeHistory() : openHistory())} title="Historial de versiones" aria-pressed={historyOpen}>
+            <History />
+          </button>
           <button className="icon-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Cambiar tema">
             {theme === 'dark' ? <Sun /> : <Moon />}
           </button>
@@ -544,6 +602,8 @@ export function App() {
               ref={editor}
               value={editorText}
               onChange={onEdit}
+              editable={!preview}
+              readOnly={!!preview}
               extensions={[yaml(), editorTheme, EditorView.lineWrapping]}
               theme={theme}
               height="100%"
@@ -578,6 +638,7 @@ export function App() {
             fitKey={diagram.layoutView ?? ''}
             busy={diagram.busy}
             tool={tool}
+            readOnly={!!preview}
             selection={selection}
             canNest={!!kind}
             onSelect={select}
@@ -598,14 +659,37 @@ export function App() {
             }}
           />
 
-          <div className="toolbar" role="toolbar" aria-label="Herramientas" onPointerDown={(e) => e.stopPropagation()}>
+          {!preview && <div className="toolbar" role="toolbar" aria-label="Herramientas" onPointerDown={(e) => e.stopPropagation()}>
             <ToolButton active={tool === 'select'} title="Seleccionar y mover" shortcut="V" onClick={() => setTool('select')}><Pointer size={17} /></ToolButton>
             <ToolButton active={tool === 'connect'} title="Conectar" shortcut="C" onClick={() => setTool('connect')}><Connect size={17} /></ToolButton>
             <ToolButton active={libraryOpen} title="Añadir elemento o grupo" shortcut="A" onClick={() => setLibraryOpen((o) => !o)}><Shapes size={17} /></ToolButton>
             <span className="tb-sep" />
             <ToolButton title="Deshacer" shortcut="⌘Z" disabled={!past.current.length} onClick={undo}><Undo size={17} /></ToolButton>
             <ToolButton title="Rehacer" shortcut="⇧⌘Z" disabled={!future.current.length} onClick={redo}><Redo size={17} /></ToolButton>
-          </div>
+          </div>}
+
+          {preview && (
+            <div className="preview-banner" onPointerDown={(e) => e.stopPropagation()}>
+              <History size={15} />
+              <span>
+                Viendo la versión de las <b>{versionTime(preview.at)}</b>
+                {preview.name && <> · {preview.name}</>}
+              </span>
+              <button className="primary-btn small" onClick={() => void restore(preview)}>Restaurar</button>
+              <button className="ghost-btn" onClick={() => setPreview(undefined)}>Volver a la actual</button>
+            </div>
+          )}
+
+          {historyOpen && (
+            <HistoryPanel
+              ws={wsId}
+              previewing={preview?.id}
+              onPreview={previewVersion}
+              onRestore={(v) => void restore(v)}
+              onSaveNamed={saveNamed}
+              onClose={closeHistory}
+            />
+          )}
 
           {libraryOpen && (
             <Library
@@ -637,7 +721,7 @@ export function App() {
             </>
           )}
 
-          {selectedElement && (
+          {selectedElement && !historyOpen && (
             <ElementInspector
               element={selectedElement}
               model={model}
@@ -664,7 +748,7 @@ export function App() {
               onClose={() => setSelection(undefined)}
             />
           )}
-          {selectedRel && (
+          {selectedRel && !historyOpen && (
             <RelationshipInspector
               rel={selectedRel}
               model={model}
@@ -689,7 +773,9 @@ export function App() {
           )}
 
           <div className="hint">
-            {tool === 'connect'
+            {preview
+              ? 'Versión anterior, solo lectura · Esc para volver a la actual'
+              : tool === 'connect'
               ? 'Arrastra de un elemento a otro para conectarlos, o a un hueco para crear uno nuevo'
               : 'Arrastra un elemento sobre un grupo para meterlo dentro · tira del ⊕ para conectar · doble clic para renombrar'}
           </div>
@@ -733,6 +819,7 @@ export function App() {
             const gone = wsId;
             setDialog(undefined);
             void rememberFolder(gone, undefined);
+            void history.deleteHistory(gone);
             switchTo(next.id);
             store.deleteWorkspace(gone);
             setWorkspaces(store.listWorkspaces());
