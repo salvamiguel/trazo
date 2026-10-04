@@ -1,25 +1,15 @@
-import type { Element, GroupStyle } from '../model/types.ts';
-import { getIcon } from './registry.ts';
+import type { Element, Model } from '../model/types.ts';
+import { getIcon, iconFor, loadIconSets, missingIconSets } from './registry.ts';
+import { GROUP_ICONS, GROUP_ICONS_DARK } from './curated.ts';
 
-/**
- * Header icon per group style, following the AWS architecture group conventions
- * (availability zones and generic groups have none). `metadata.trazo.icon` overrides it.
- */
-export const GROUP_ICONS: Partial<Record<GroupStyle, string>> = {
-  'aws-cloud': 'tabler:brand-aws',
-  'aws-account': 'tabler:user-square',
-  'aws-region': 'tabler:flag',
-  'aws-vpc': 'tabler:cloud-lock',
-  'aws-subnet-public': 'tabler:lock-open',
-  'aws-subnet-private': 'tabler:lock',
-  'aws-security-group': 'tabler:shield-lock',
-  'k8s-cluster': 'logos:kubernetes',
-};
+export { GROUP_ICONS };
 
 export const GROUP_BADGE = { size: 22, inset: 8, gap: 8 };
 
-export function groupIconFor(el: Element): string | undefined {
-  return el.icon ?? (el.groupStyle ? GROUP_ICONS[el.groupStyle] : undefined);
+export function groupIconFor(el: Element, dark = false): string | undefined {
+  if (el.icon) return el.icon;
+  if (!el.groupStyle) return undefined;
+  return (dark ? GROUP_ICONS_DARK[el.groupStyle] : undefined) ?? GROUP_ICONS[el.groupStyle];
 }
 
 /** Horizontal room the badge takes before the group title. */
@@ -31,8 +21,8 @@ export function groupBadgeSpace(el: Element): number {
  * Standalone SVG for a group header badge: monochrome icons are drawn white on a square
  * in the group colour (as AWS does); full-colour logos are drawn as they are.
  */
-export function groupBadgeSvg(el: Element, color: string): string | null {
-  const icon = getIcon(groupIconFor(el));
+export function groupBadgeSvg(el: Element, color: string, dark = false): string | null {
+  const icon = getIcon(groupIconFor(el, dark));
   if (!icon) return null;
   const s = GROUP_BADGE.size;
   if (!icon.mono) {
@@ -56,4 +46,24 @@ function isLight(hex: string): boolean {
     return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   });
   return 0.2126 * r! + 0.7152 * g! + 0.0722 * b! > 0.45;
+}
+
+/** Every icon reference a model can draw: element icons, node-type fallbacks and group badges in both themes. */
+export function modelIconRefs(model: Model): string[] {
+  const refs = new Set<string>();
+  for (const el of model.elements.values()) {
+    const icon = iconFor(el.icon, el.nodeType);
+    if (icon) refs.add(icon);
+    for (const dark of [false, true]) {
+      const g = groupIconFor(el, dark);
+      if (g) refs.add(g);
+    }
+  }
+  return [...refs];
+}
+
+/** Loads the full icon sets a model needs that the core subset does not cover. */
+export async function ensureModelIcons(model: Model): Promise<void> {
+  const missing = missingIconSets(modelIconRefs(model));
+  if (missing.length) await loadIconSets(missing);
 }

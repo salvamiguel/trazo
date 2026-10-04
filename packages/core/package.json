@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "icons": "tsx scripts/icon-packs.ts"
   },
   "dependencies": {
     "@iconify-json/logos": "^1.2.15",
@@ -21,7 +22,10 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@iconify/tools": "^5.0.14",
+    "@squinch/pack-azure": "0.14.0",
     "@types/node": "^26.6.4",
+    "aws-icons": "3.3.0",
     "fast-xml-parser": "^5.11.2",
     "tsx": "^4.23.15",
     "typescript": "5.9.3",

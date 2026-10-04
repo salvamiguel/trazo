@@ -73,7 +73,7 @@ export function renderSvg(layout: Layout, model: Model, options: SvgOptions = {}
   for (const g of groups) {
     const el = model.elements.get(g.id)!;
     const tokens = theme.groups[el.groupStyle ?? 'generic'];
-    const badge = groupBadgeSvg(el, tokens.stroke);
+    const badge = groupBadgeSvg(el, tokens.stroke, options.theme === 'dark');
     const badgeMarkup = badge
       ? badge.replace('<svg ', `<svg x="${r(g.x + GROUP_BADGE.inset)}" y="${r(g.y + GROUP_BADGE.inset)}" `)
       : '';

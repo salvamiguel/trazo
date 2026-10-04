@@ -1,0 +1,116 @@
+# Aplicación web en Azure: ejemplo de la vista de infraestructura Azure de Trazo.
+$schema: https://calm.finos.org/release/1.2/meta/calm.json
+nodes:
+  - unique-id: usuarios
+    node-type: actor
+    name: Usuarios
+    description: Personas que usan la aplicación
+  - unique-id: front-door
+    node-type: service
+    name: Front Door
+    description: Entrada global con WAF
+    metadata:
+      trazo: { technology: Front Door, icon: azure/front-door }
+  - unique-id: suscripcion
+    node-type: ecosystem
+    name: Suscripción producción
+    description: Suscripción de Azure
+    metadata:
+      trazo: { group-style: azure-subscription }
+  - unique-id: region
+    node-type: ecosystem
+    name: West Europe
+    description: Región principal
+    metadata:
+      trazo: { group-style: azure-region }
+  - unique-id: vnet
+    node-type: network
+    name: vnet-prod
+    description: 10.0.0.0/16
+    metadata:
+      trazo: { group-style: azure-vnet }
+  - unique-id: snet-gateway
+    node-type: network
+    name: snet-gateway
+    description: 10.0.0.0/24
+    metadata:
+      trazo: { group-style: azure-subnet }
+  - unique-id: snet-app
+    node-type: network
+    name: snet-app
+    description: 10.0.1.0/24
+    metadata:
+      trazo: { group-style: azure-subnet }
+  - unique-id: snet-datos
+    node-type: network
+    name: snet-datos
+    description: 10.0.2.0/24
+    metadata:
+      trazo: { group-style: azure-subnet }
+  - unique-id: app-gateway
+    node-type: service
+    name: Application Gateway
+    description: Balanceo interno
+    metadata:
+      trazo: { technology: Application Gateway, icon: azure/app-gateway }
+  - unique-id: aks
+    node-type: service
+    name: Aplicación
+    description: Servicio principal
+    metadata:
+      trazo: { technology: AKS, icon: azure/aks }
+  - unique-id: sql
+    node-type: database
+    name: Base de datos
+    description: Datos de la aplicación
+    metadata:
+      trazo: { technology: Azure SQL, icon: azure/sql-db }
+  - unique-id: key-vault
+    node-type: service
+    name: Key Vault
+    description: Secretos y certificados
+    metadata:
+      trazo: { technology: Key Vault, icon: azure/key-vault }
+
+relationships:
+  - unique-id: d-suscripcion
+    relationship-type:
+      deployed-in: { container: suscripcion, nodes: [region] }
+  - unique-id: d-region
+    relationship-type:
+      deployed-in: { container: region, nodes: [vnet, key-vault] }
+  - unique-id: d-vnet
+    relationship-type:
+      deployed-in: { container: vnet, nodes: [snet-gateway, snet-app, snet-datos] }
+  - unique-id: d-snet-gateway
+    relationship-type:
+      deployed-in: { container: snet-gateway, nodes: [app-gateway] }
+  - unique-id: d-snet-app
+    relationship-type:
+      deployed-in: { container: snet-app, nodes: [aks] }
+  - unique-id: d-snet-datos
+    relationship-type:
+      deployed-in: { container: snet-datos, nodes: [sql] }
+  - unique-id: r-usuarios-fd
+    description: Usa la app
+    protocol: HTTPS
+    relationship-type:
+      interacts: { actor: usuarios, nodes: [front-door] }
+  - unique-id: r-fd-agw
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: front-door }, destination: { node: app-gateway } }
+  - unique-id: r-agw-aks
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: app-gateway }, destination: { node: aks } }
+  - unique-id: r-aks-sql
+    description: Lee y escribe
+    protocol: JDBC
+    relationship-type:
+      connects: { source: { node: aks }, destination: { node: sql } }
+  - unique-id: r-aks-kv
+    description: Lee secretos
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: aks }, destination: { node: key-vault } }

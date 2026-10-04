@@ -1,5 +1,5 @@
 /** What the shape library offers: curated entries per category, plus search over every icon. */
-import { iconIds, type GroupStyle } from '@trazo/core';
+import { CURATED, GROUP_ICONS, resolveIconId, type CuratedIcon, type GroupStyle, type IconIndex } from '@trazo/core';
 
 export interface CatalogEntry {
   key: string;
@@ -11,6 +11,8 @@ export interface CatalogEntry {
   nodeType: string;
   technology?: string;
   groupStyle?: GroupStyle;
+  /** Shown under the label in search results (pack and category). */
+  hint?: string;
 }
 
 export interface CatalogSection {
@@ -19,41 +21,57 @@ export interface CatalogSection {
   entries: CatalogEntry[];
 }
 
+/** Group styles with their labels, in the order the inspector lists them. */
+export const GROUP_STYLES: Array<[GroupStyle, string, nodeType: string]> = [
+  ['aws-cloud', 'AWS Cloud', 'ecosystem'],
+  ['aws-account', 'Cuenta AWS', 'ecosystem'],
+  ['aws-region', 'Región AWS', 'ecosystem'],
+  ['aws-vpc', 'VPC', 'network'],
+  ['aws-az', 'Zona de disponibilidad AWS', 'network'],
+  ['aws-subnet-public', 'Subnet pública', 'network'],
+  ['aws-subnet-private', 'Subnet privada', 'network'],
+  ['aws-security-group', 'Security group', 'network'],
+  ['azure-management-group', 'Grupo de administración', 'ecosystem'],
+  ['azure-subscription', 'Suscripción Azure', 'ecosystem'],
+  ['azure-resource-group', 'Grupo de recursos', 'ecosystem'],
+  ['azure-region', 'Región Azure', 'ecosystem'],
+  ['azure-vnet', 'Red virtual (VNet)', 'network'],
+  ['azure-subnet', 'Subred Azure', 'network'],
+  ['azure-az', 'Zona de disponibilidad Azure', 'network'],
+  ['k8s-cluster', 'Clúster Kubernetes', 'system'],
+  ['k8s-namespace', 'Namespace', 'system'],
+  ['system', 'Límite de sistema', 'system'],
+  ['generic', 'Grupo', 'system'],
+];
+
+/** Badge-less groups still need a picture in the library. */
+const GROUP_PREVIEW: Partial<Record<GroupStyle, string>> = {
+  'aws-az': 'tabler:layout-rows',
+  'azure-az': 'tabler:layout-rows',
+  'k8s-namespace': 'tabler:folder',
+  system: 'tabler:box-margin',
+  generic: 'tabler:square-dashed',
+};
+
 const shape = (label: string, preview: string, nodeType: string): CatalogEntry => ({ key: `shape:${label}`, label, preview, nodeType });
 
-const group = (label: string, groupStyle: GroupStyle, nodeType: string, preview: string): CatalogEntry => ({
-  key: `group:${groupStyle}`,
-  label,
-  preview,
-  nodeType,
-  groupStyle,
-});
+const groups = (prefix: string): CatalogEntry[] =>
+  GROUP_STYLES.filter(([style]) => (prefix ? style.startsWith(prefix) : !/^(aws|azure)-/.test(style))).map(([style, label, nodeType]) => ({
+    key: `group:${style}`,
+    label,
+    preview: GROUP_PREVIEW[style] ?? GROUP_ICONS[style] ?? 'tabler:square-dashed',
+    nodeType,
+    groupStyle: style,
+  }));
 
-/** A logo from the `logos` set; `ref` is what goes in the model. */
-const logo = (label: string, name: string, nodeType = 'service', ref = name): CatalogEntry => ({
-  key: `logos:${name}`,
+const icon = ([ref, label, nodeType = 'service']: CuratedIcon): CatalogEntry => ({
+  key: resolveIconId(ref),
   label,
   icon: ref,
-  preview: `logos:${name}`,
+  preview: ref,
   nodeType,
   technology: label,
 });
-
-const AWS: Array<[string, string, string?]> = [
-  ['lambda', 'Lambda'], ['ec2', 'EC2'], ['ecs', 'ECS'], ['eks', 'EKS'], ['fargate', 'Fargate'],
-  ['api-gateway', 'API Gateway'], ['elb', 'Load Balancer'], ['cloudfront', 'CloudFront'], ['route53', 'Route 53'],
-  ['waf', 'WAF'], ['shield', 'Shield'], ['vpc', 'VPC'], ['s3', 'S3', 'data-asset'], ['glacier', 'Glacier', 'data-asset'],
-  ['rds', 'RDS', 'database'], ['aurora', 'Aurora', 'database'], ['dynamodb', 'DynamoDB', 'database'],
-  ['elasticache', 'ElastiCache', 'database'], ['documentdb', 'DocumentDB', 'database'], ['neptune', 'Neptune', 'database'],
-  ['redshift', 'Redshift', 'database'], ['keyspaces', 'Keyspaces', 'database'], ['timestream', 'Timestream', 'database'],
-  ['sqs', 'SQS'], ['sns', 'SNS'], ['eventbridge', 'EventBridge'], ['kinesis', 'Kinesis'], ['msk', 'MSK'], ['mq', 'Amazon MQ'],
-  ['step-functions', 'Step Functions'], ['appsync', 'AppSync'], ['cognito', 'Cognito'], ['iam', 'IAM'], ['kms', 'KMS'],
-  ['secrets-manager', 'Secrets Manager'], ['certificate-manager', 'Certificate Manager'], ['cloudwatch', 'CloudWatch'],
-  ['cloudtrail', 'CloudTrail'], ['xray', 'X-Ray'], ['systems-manager', 'Systems Manager'], ['config', 'Config'],
-  ['athena', 'Athena'], ['glue', 'Glue'], ['lake-formation', 'Lake Formation'], ['quicksight', 'QuickSight'],
-  ['open-search', 'OpenSearch'], ['ses', 'SES'], ['codepipeline', 'CodePipeline'], ['codebuild', 'CodeBuild'],
-  ['codedeploy', 'CodeDeploy'], ['cloudformation', 'CloudFormation'], ['amplify', 'Amplify'], ['backup', 'Backup'], ['batch', 'Batch'],
-];
 
 export const SECTIONS: CatalogSection[] = [
   {
@@ -71,146 +89,94 @@ export const SECTIONS: CatalogSection[] = [
       shape('Sistema externo', 'tabler:world', 'system'),
     ],
   },
-  {
-    id: 'groups',
-    title: 'Grupos',
-    entries: [
-      group('AWS Cloud', 'aws-cloud', 'ecosystem', 'tabler:brand-aws'),
-      group('Cuenta AWS', 'aws-account', 'ecosystem', 'tabler:user-square'),
-      group('Región', 'aws-region', 'ecosystem', 'tabler:flag'),
-      group('VPC', 'aws-vpc', 'network', 'tabler:cloud-lock'),
-      group('Zona de disponibilidad', 'aws-az', 'network', 'tabler:layout-rows'),
-      group('Subnet pública', 'aws-subnet-public', 'network', 'tabler:lock-open'),
-      group('Subnet privada', 'aws-subnet-private', 'network', 'tabler:lock'),
-      group('Security group', 'aws-security-group', 'network', 'tabler:shield-lock'),
-      group('Clúster Kubernetes', 'k8s-cluster', 'system', 'logos:kubernetes'),
-      group('Namespace', 'k8s-namespace', 'system', 'tabler:folder'),
-      group('Límite de sistema', 'system', 'system', 'tabler:box-margin'),
-      group('Grupo', 'generic', 'system', 'tabler:square-dashed'),
-    ],
-  },
-  {
-    id: 'aws',
-    title: 'AWS',
-    entries: AWS.map(([name, label, type]) => logo(label, `aws-${name}`, type, `aws/${name}`)),
-  },
-  {
-    id: 'k8s',
-    title: 'Kubernetes y CNCF',
-    entries: [
-      logo('Kubernetes', 'kubernetes', 'system', 'k8s/kubernetes'),
-      logo('Helm', 'helm', 'service', 'cncf/helm'),
-      logo('Argo CD', 'argo-icon', 'service', 'cncf/argocd'),
-      logo('Flux', 'flux'),
-      logo('Docker', 'docker-icon'),
-      logo('Prometheus', 'prometheus'),
-      logo('Grafana', 'grafana'),
-      logo('OpenTelemetry', 'opentelemetry-icon'),
-      logo('Envoy', 'envoy-icon'),
-      logo('Linkerd', 'linkerd'),
-      logo('NGINX', 'nginx'),
-      logo('Kong', 'kong-icon'),
-    ],
-  },
-  {
-    id: 'ai',
-    title: 'IA',
-    entries: [
-      logo('Claude', 'anthropic-icon', 'service', 'ai/anthropic'),
-      logo('OpenAI', 'openai-icon', 'service', 'ai/openai'),
-      logo('Gemini', 'google-gemini-icon'),
-      logo('Mistral', 'mistral-ai-icon'),
-      logo('Hugging Face', 'hugging-face-icon'),
-      logo('LangChain', 'langchain-icon'),
-      logo('Meta Llama', 'meta-icon'),
-      logo('NVIDIA', 'nvidia'),
-      logo('PyTorch', 'pytorch-icon'),
-      logo('TensorFlow', 'tensorflow'),
-    ],
-  },
-  {
-    id: 'iac',
-    title: 'IaC y DevOps',
-    entries: [
-      logo('Terraform', 'terraform-icon', 'service', 'hashicorp/terraform'),
-      logo('Vault', 'vault-icon'),
-      logo('Consul', 'consul'),
-      logo('Nomad', 'nomad-icon'),
-      logo('Pulumi', 'pulumi-icon'),
-      logo('Ansible', 'ansible'),
-      logo('GitHub Actions', 'github-actions'),
-      logo('GitLab', 'gitlab-icon'),
-      logo('Jenkins', 'jenkins'),
-      logo('SonarQube', 'sonarqube'),
-    ],
-  },
-  {
-    id: 'data',
-    title: 'Datos y mensajería',
-    entries: [
-      logo('PostgreSQL', 'postgresql', 'database'),
-      logo('MySQL', 'mysql-icon', 'database'),
-      logo('MongoDB', 'mongodb-icon', 'database'),
-      logo('Redis', 'redis', 'database'),
-      logo('Cassandra', 'cassandra', 'database'),
-      logo('Elasticsearch', 'elasticsearch', 'database'),
-      logo('Kafka', 'kafka-icon'),
-      logo('RabbitMQ', 'rabbitmq-icon'),
-      logo('Snowflake', 'snowflake-icon', 'database'),
-      logo('Databricks', 'databricks-icon'),
-    ],
-  },
-  {
-    id: 'cloud',
-    title: 'Otras nubes y SaaS',
-    entries: [
-      logo('Azure', 'microsoft-azure', 'ecosystem', 'azure/azure'),
-      logo('Google Cloud', 'google-cloud', 'ecosystem'),
-      logo('Cloud Run', 'google-cloud-run'),
-      logo('Okta', 'okta-icon'),
-      logo('Auth0', 'auth0-icon'),
-      logo('Datadog', 'datadog-icon'),
-      logo('Splunk', 'splunk'),
-      logo('Sentry', 'sentry-icon'),
-    ],
-  },
+  { id: 'groups', title: 'Grupos', entries: groups('') },
+  { id: 'aws', title: 'AWS', entries: CURATED.aws.map(icon) },
+  { id: 'groups-aws', title: 'Grupos AWS', entries: groups('aws-') },
+  { id: 'azure', title: 'Azure', entries: CURATED.azure.map(icon) },
+  { id: 'groups-azure', title: 'Grupos Azure', entries: groups('azure-') },
+  { id: 'k8s', title: 'Kubernetes y CNCF', entries: CURATED.k8s.map(icon) },
+  { id: 'ai', title: 'IA', entries: CURATED.ai.map(icon) },
+  { id: 'iac', title: 'IaC y DevOps', entries: CURATED.iac.map(icon) },
+  { id: 'data', title: 'Datos y mensajería', entries: CURATED.data.map(icon) },
+  { id: 'cloud', title: 'Otras nubes y SaaS', entries: CURATED.cloud.map(icon) },
 ];
 
 const curated = SECTIONS.flatMap((s) => s.entries);
+const curatedKeys = new Set(curated.map((e) => e.key));
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
-let all: CatalogEntry[] | undefined;
-/** Every icon in the registry as an entry, built on first search. */
-function everything(): CatalogEntry[] {
-  if (all) return all;
-  const seen = new Set(curated.map((e) => e.preview));
-  const extra = iconIds()
-    .filter((id) => !seen.has(id))
-    .map((id): CatalogEntry => {
-      const name = id.split(':')[1]!;
-      const label = name.replace(/-icon$/, '').replace(/-/g, ' ');
-      return { key: id, label, icon: id, preview: id, nodeType: 'service', technology: id.startsWith('logos:') ? label : undefined };
-    });
-  all = [...curated, ...extra];
-  return all;
+const PACK: Record<string, string> = { aws: 'AWS', azure: 'Azure', logos: 'Logo', tabler: 'Glifo' };
+const NODE_TYPE_BY_CATEGORY: Record<string, string> = {
+  Database: 'database',
+  Databases: 'database',
+  Storage: 'data-asset',
+  Networking: 'network',
+  'Networking Content Delivery': 'network',
+};
+
+interface Searchable {
+  entry: CatalogEntry;
+  /** Normalised text matched against the query: label, aliases, pack, category. */
+  hay: string;
+  rank: number;
 }
 
-/** Curated matches first, then the rest of the registry; brand logos before generic glyphs. */
-export function searchCatalog(query: string, limit = 60): CatalogEntry[] {
+let searchable: Searchable[] | undefined;
+let builtFrom: IconIndex | undefined;
+
+/** Every icon of every pack as a searchable entry, built once the index has loaded. */
+function everything(index: IconIndex | undefined): Searchable[] {
+  if (searchable && builtFrom === index) return searchable;
+  const list: Searchable[] = curated.map((entry) => ({ entry, hay: norm(`${entry.label} ${entry.preview} ${entry.icon ?? ''}`), rank: 100 }));
+  for (const [prefix, set] of Object.entries(index ?? {})) {
+    const aliasesOf = new Map<string, string[]>();
+    for (const [alias, target] of Object.entries(set.aliases)) aliasesOf.set(target, [...(aliasesOf.get(target) ?? []), alias]);
+    const official = prefix === 'aws' || prefix === 'azure';
+    for (const [name, [title, category]] of Object.entries(set.icons)) {
+      const id = `${prefix}:${name}`;
+      if (curatedKeys.has(id)) continue;
+      // Tiles are narrow: "Amazon SageMaker Canvas" shows as "SageMaker Canvas" (full name in the tooltip).
+      const label = prefix === 'logos' ? title.replace(/ icon$/, '') : prefix === 'aws' ? title.replace(/^(Amazon|AWS) /, '') : title;
+      const ref = official ? `${prefix}/${name}` : id;
+      list.push({
+        entry: {
+          key: id,
+          label,
+          icon: ref,
+          preview: id,
+          nodeType: NODE_TYPE_BY_CATEGORY[category] ?? 'service',
+          technology: prefix === 'tabler' ? undefined : label,
+          hint: [title !== label ? title : '', PACK[prefix] ?? prefix, category].filter(Boolean).join(' · '),
+        },
+        hay: norm(`${title} ${name} ${(aliasesOf.get(name) ?? []).join(' ')} ${PACK[prefix] ?? ''} ${prefix} ${category}`),
+        rank: official ? 15 : prefix === 'logos' ? 10 : 0,
+      });
+    }
+  }
+  searchable = list;
+  builtFrom = index;
+  return list;
+}
+
+/**
+ * Curated matches first, then the official AWS and Azure packs, brand logos and generic glyphs.
+ * Without the index (still loading) only the curated entries are searched.
+ */
+export function searchCatalog(query: string, index?: IconIndex, limit = 60): CatalogEntry[] {
   const q = norm(query.trim());
   if (!q) return [];
   const words = q.split(/\s+/);
-  const score = (e: CatalogEntry) => {
-    const hay = norm(`${e.label} ${e.preview}`);
-    if (!words.every((w) => hay.includes(w))) return -1;
-    let s = curated.includes(e) ? 100 : 0;
-    if (norm(e.label).startsWith(q)) s += 20;
-    if (e.preview.startsWith('logos:')) s += 10;
-    return s;
-  };
-  return everything()
-    .map((e) => [score(e), e] as const)
-    .filter(([s]) => s >= 0)
+  const scored: Array<[number, CatalogEntry]> = [];
+  for (const { entry, hay, rank } of everything(index)) {
+    if (!words.every((w) => hay.includes(w))) continue;
+    const label = norm(entry.label);
+    let s = rank;
+    if (label === q) s += 40;
+    else if (label.startsWith(q)) s += 20;
+    else if (hay.split(' ').includes(q)) s += 25;
+    scored.push([s, entry]);
+  }
+  return scored
     .sort((a, b) => b[0] - a[0])
     .slice(0, limit)
     .map(([, e]) => e);

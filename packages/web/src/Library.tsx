@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SECTIONS, searchCatalog, type CatalogEntry } from './catalog.ts';
-import { IconGlyph } from './IconGlyph.tsx';
+import { IconGlyph, useIconIndex } from './IconGlyph.tsx';
 import { Close, Search } from './icons.tsx';
 
 export const DRAG_TYPE = 'application/x-trazo-entry';
@@ -32,18 +32,19 @@ export function Picker({ onPick, sections, draggable, placeholder = 'Buscar icon
     if (autoFocus) input.current?.focus();
   }, [autoFocus]);
 
+  const index = useIconIndex(query.trim() !== '');
   const results = useMemo(() => {
-    const r = searchCatalog(query);
+    const r = searchCatalog(query, index);
     for (const e of r) found.set(e.key, e);
     return r;
-  }, [query]);
+  }, [query, index]);
   const shown = SECTIONS.filter((s) => !sections || sections.includes(s.id));
 
   const tile = (e: CatalogEntry) => (
     <button
       key={e.key}
       className="tile"
-      title={e.label}
+      title={e.hint ? `${e.label}\n${e.hint}` : e.label}
       draggable={draggable}
       onDragStart={(ev) => {
         ev.dataTransfer.setData(DRAG_TYPE, e.key);
@@ -73,7 +74,11 @@ export function Picker({ onPick, sections, draggable, placeholder = 'Buscar icon
       </label>
       <div className="picker-body">
         {query.trim() ? (
-          results.length ? <div className="tiles">{results.map(tile)}</div> : <p className="picker-empty">Nada coincide con «{query}».</p>
+          results.length ? (
+            <div className="tiles">{results.map(tile)}</div>
+          ) : (
+            <p className="picker-empty">{index ? <>Nada coincide con «{query}».</> : 'Buscando en todos los iconos…'}</p>
+          )
         ) : (
           shown.map((s) => (
             <section key={s.id}>

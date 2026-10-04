@@ -3,23 +3,10 @@ import type { Element, GroupStyle, Model, Relationship } from '@trazo/core';
 import { NODE_TYPES, PROTOCOLS, type NodeFields } from './edit.ts';
 import { IconGlyph } from './IconGlyph.tsx';
 import { Picker } from './Library.tsx';
+import { GROUP_STYLES } from './catalog.ts';
 import { Close, Code, Swap, Trash } from './icons.tsx';
 
-const GROUP_STYLES: Array<[GroupStyle | '', string]> = [
-  ['', 'Ninguno'],
-  ['aws-cloud', 'AWS Cloud'],
-  ['aws-account', 'Cuenta AWS'],
-  ['aws-region', 'Región'],
-  ['aws-vpc', 'VPC'],
-  ['aws-az', 'Zona de disponibilidad'],
-  ['aws-subnet-public', 'Subnet pública'],
-  ['aws-subnet-private', 'Subnet privada'],
-  ['aws-security-group', 'Security group'],
-  ['k8s-cluster', 'Clúster Kubernetes'],
-  ['k8s-namespace', 'Namespace'],
-  ['system', 'Límite de sistema'],
-  ['generic', 'Grupo'],
-];
+const GROUP_OPTIONS: Array<[GroupStyle | '', string]> = [['', 'Ninguno'], ...GROUP_STYLES.map(([style, label]): [GroupStyle, string] => [style, label])];
 
 const NODE_TYPE_LABELS: Record<string, string> = {
   actor: 'Persona (actor)',
@@ -143,7 +130,7 @@ export function ElementInspector(p: ElementProps) {
           {picking && (
             <div className="icon-picker">
               <Picker
-                sections={['aws', 'k8s', 'ai', 'iac', 'data', 'cloud']}
+                sections={['aws', 'azure', 'k8s', 'ai', 'iac', 'data', 'cloud']}
                 placeholder="Buscar icono…"
                 onPick={(entry) => {
                   p.onChange({ icon: entry.icon ?? entry.preview, ...(e.technology ? {} : entry.technology ? { technology: entry.technology } : {}) });
@@ -176,7 +163,7 @@ export function ElementInspector(p: ElementProps) {
         <SelectField
           label="Estilo de grupo"
           value={e.groupStyle ?? ''}
-          options={GROUP_STYLES}
+          options={GROUP_OPTIONS}
           onChange={(v) => p.onChange({ 'group-style': (v || undefined) as GroupStyle | undefined })}
         />
       </div>

@@ -1,6 +1,7 @@
 /** Starting points for a new workspace. Every template is valid CALM 1.2. */
 import type { WorkspaceSources } from '@trazo/core';
 import { EXAMPLE } from './example.ts';
+import AZURE_MODEL from '../../../examples/azure-web/architecture.calm.yaml?raw';
 
 export interface Template {
   id: string;
@@ -82,7 +83,7 @@ nodes:
     name: Load Balancer
     description: Entrada HTTPS
     metadata:
-      trazo: { technology: ALB, icon: aws/elb }
+      trazo: { technology: ALB, icon: aws/alb }
   - unique-id: app
     node-type: service
     name: Aplicación
@@ -201,6 +202,7 @@ relationships:
 
 export const VIEW_KINDS = {
   'aws-infra': { label: 'Infraestructura AWS', hint: 'Cuentas, VPC, zonas y subnets', preset: 'aws-infra', hierarchy: 'deployment' },
+  'azure-infra': { label: 'Infraestructura Azure', hint: 'Suscripciones, VNet y subredes', preset: 'azure-infra', hierarchy: 'deployment' },
   'c4-container': { label: 'C4 contenedores', hint: 'Sistemas y sus contenedores', preset: 'c4-container', hierarchy: 'composition' },
   free: { label: 'Libre', hint: 'Agrupado por despliegue, sin preset', preset: undefined, hierarchy: 'deployment' },
   flat: { label: 'Sin grupos', hint: 'Solo elementos y relaciones', preset: undefined, hierarchy: 'none' },
@@ -233,6 +235,12 @@ export const TEMPLATES: Template[] = [
     name: 'Infraestructura AWS',
     description: 'VPC con dos zonas y subnets públicas y privadas',
     sources: { model: AWS_MODEL, views: { 'infra-aws': viewYaml('Infraestructura AWS', 'aws-infra') } },
+  },
+  {
+    id: 'azure',
+    name: 'Infraestructura Azure',
+    description: 'VNet con subredes de entrada, aplicación y datos',
+    sources: { model: AZURE_MODEL, views: { 'infra-azure': viewYaml('Infraestructura Azure', 'azure-infra') } },
   },
   {
     id: 'c4',
