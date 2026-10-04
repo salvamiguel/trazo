@@ -93,6 +93,9 @@ interface ElementProps {
   /** Possible containers, already filtered to avoid cycles. */
   containers: Element[];
   canNest: boolean;
+  /** Views of the workspace and whether this element appears in each. */
+  views: Array<{ id: string; title: string; all: boolean; shown: boolean }>;
+  onToggleView: (viewId: string, shown: boolean) => void;
   focusName: number;
   onChange: (fields: NodeFields) => void;
   onParent: (parent: string | undefined) => void;
@@ -158,6 +161,18 @@ export function ElementInspector(p: ElementProps) {
           options={[['', 'Nivel superior'], ...p.containers.map((c): [string, string] => [c.id, c.name])]}
           onChange={(v) => p.onParent(v || undefined)}
         />
+        <div className="field">
+          <span>Aparece en</span>
+          <div className="view-checks">
+            {p.views.map((v) => (
+              <label key={v.id} className={v.all ? 'all' : ''} title={v.all ? 'Esta vista muestra todos los elementos del modelo' : undefined}>
+                <input type="checkbox" checked={v.shown} disabled={v.all} onChange={(ev) => p.onToggleView(v.id, ev.target.checked)} />
+                {v.title}
+                {v.all && <small>todas</small>}
+              </label>
+            ))}
+          </div>
+        </div>
         <SelectField
           label="Estilo de grupo"
           value={e.groupStyle ?? ''}

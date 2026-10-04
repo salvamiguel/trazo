@@ -59,6 +59,8 @@ export interface View {
   hierarchy: Hierarchy;
   /** Leaf elements to show; ancestors are added automatically. Empty = all. */
   include: string[];
+  /** True when the view has no `include` list and shows every element. */
+  includeAll: boolean;
   direction: Direction;
 }
 

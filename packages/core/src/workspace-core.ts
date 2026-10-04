@@ -37,6 +37,6 @@ export function parseWorkspace(sources: WorkspaceSources): Workspace {
       diagnostics.push({ level: 'error', message: `View ${id}: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
-  if (views.length === 0) views.push({ id: 'default', hierarchy: 'deployment', include: [], direction: 'right' });
+  if (views.length === 0) views.push({ id: 'default', hierarchy: 'deployment', include: [], includeAll: true, direction: 'right' });
   return { model, views, diagnostics };
 }

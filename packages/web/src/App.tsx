@@ -11,18 +11,36 @@ import {
   containmentFor,
   deleteNode,
   deleteRelationship,
+  freshViewId,
+  renameView,
   reverseRelationship,
+  setInView,
   setParent,
   updateNode,
   updateRelationship,
 } from './edit.ts';
-import { EXAMPLE, EXAMPLE_NAME } from './example.ts';
-import { Alert, Check, Command, Connect, Download, Logo, Moon, Pointer, Redo, Reset, Shapes, Sun, Undo } from './icons.tsx';
+import { ConfirmDialog, ErrorDialog, NewViewDialog, NewWorkspaceDialog, RenameDialog } from './Dialogs.tsx';
+import {
+  canLinkFolders,
+  ensurePermission,
+  openFolder,
+  pickSaveFolder,
+  readPickedFiles,
+  recallFolder,
+  rememberFolder,
+  writeFolder,
+  MODEL_FILE,
+  type DirHandle,
+  type OpenedFolder,
+} from './folder.ts';
+import { Alert, Check, Command, Connect, Dots, Download, Folder, Logo, Moon, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
 import { ElementInspector, RelationshipInspector } from './Inspector.tsx';
 import { entryByKey, Library, Picker } from './Library.tsx';
+import { TEMPLATES, viewYaml } from './templates.ts';
 import { drawioFor, useDiagram } from './useDiagram.ts';
+import { WorkspaceMenu } from './WorkspaceMenu.tsx';
+import * as store from './workspaces.ts';
 
-const STORAGE_KEY = 'trazo.workspace.v1';
 const THEME_KEY = 'trazo.theme';
 const HISTORY_LIMIT = 100;
 
@@ -69,13 +87,47 @@ const editorTheme = EditorView.theme({
 
 type Tab = 'model' | 'view';
 
+type Dialog =
+  | { kind: 'new-workspace' }
+  | { kind: 'rename-workspace' }
+  | { kind: 'delete-workspace' }
+  | { kind: 'new-view' }
+  | { kind: 'rename-view'; id: string }
+  | { kind: 'delete-view'; id: string }
+  | { kind: 'error'; message: string };
+
+/** A workspace synced with a folder on disk; `ok` is false until write access is granted. */
+interface FolderLink {
+  handle: DirHandle;
+  modelFile: string;
+  ok: boolean;
+  error?: string;
+}
+
+const firstView = (s: WorkspaceSources, prefer?: string) => {
+  const ids = Object.keys(s.views).sort();
+  return ids.find((v) => v === prefer) ?? ids[0] ?? 'default';
+};
+
 export function App() {
-  const [sources, setSources] = useState<WorkspaceSources>(() => load(STORAGE_KEY, EXAMPLE));
+  const [workspaces, setWorkspaces] = useState(() => store.listWorkspaces());
+  const [wsId, setWsId] = useState<string>(() => {
+    const active = store.activeWorkspace();
+    return workspaces.find((w) => w.id === active)?.id ?? workspaces[0]!.id;
+  });
+  const [sources, setSources] = useState<WorkspaceSources>(() => store.loadSources(wsId) ?? TEMPLATES[0]!.sources);
+  const [link, setLink] = useState<FolderLink>();
+  const [dialog, setDialog] = useState<Dialog>();
+  const [viewMenu, setViewMenu] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(() =>
     load<ThemeName | null>(THEME_KEY, null) ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   );
   const viewIds = Object.keys(sources.views).sort();
-  const [viewId, setViewId] = useState(() => viewIds.find((v) => v === 'infra-aws') ?? viewIds[0] ?? 'default');
+  const [viewId, setViewId] = useState(() => firstView(sources, 'infra-aws'));
+  // A view that disappeared (deleted, or another workspace) falls back to the first one.
+  useEffect(() => {
+    if (!(viewId in sources.views) && viewIds[0]) setViewId(viewIds[0]);
+  }, [viewId, sources.views, viewIds]);
   const [tab, setTab] = useState<Tab>('model');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -110,14 +162,38 @@ export function App() {
     save(THEME_KEY, theme);
   }, [theme]);
 
+  // Autosave to this browser, and to the linked folder when there is one.
   useEffect(() => {
     setSaved(false);
-    const t = setTimeout(() => {
-      save(STORAGE_KEY, sources);
+    const t = setTimeout(async () => {
+      store.saveSources(wsId, sources);
+      setWorkspaces(store.listWorkspaces());
+      if (link?.ok) {
+        try {
+          await writeFolder(link.handle, sources, link.modelFile);
+          if (link.error) setLink({ ...link, error: undefined });
+        } catch (err) {
+          setLink({ ...link, ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
       setSaved(true);
     }, 600);
     return () => clearTimeout(t);
-  }, [sources]);
+  }, [sources, wsId, link]);
+
+  // Folder links survive reloads, but the browser asks again for write access.
+  useEffect(() => {
+    let cancelled = false;
+    setLink(undefined);
+    recallFolder(wsId).then(async (saved) => {
+      if (!saved || cancelled) return;
+      const granted = await (saved.handle as DirHandle).queryPermission({ mode: 'readwrite' }).catch(() => 'denied');
+      if (!cancelled) setLink({ ...saved, ok: granted === 'granted' });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [wsId]);
 
   /** Every canvas edit goes through here so it can be undone. */
   const commit = useCallback((next: WorkspaceSources) => {
@@ -218,7 +294,7 @@ export function App() {
         setPaletteOpen((o) => !o);
         return;
       }
-      if (typing() || paletteOpen) return;
+      if (typing() || paletteOpen || dialog) return;
       const key = e.key.toLowerCase();
       if (mod && key === 'z') {
         e.preventDefault();
@@ -252,10 +328,86 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // ---- Workspaces and folders ----------------------------------------------------------------
+  const fail = (err: unknown) => setDialog({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+
+  const switchTo = (id: string, next?: WorkspaceSources) => {
+    const loaded = next ?? store.loadSources(id);
+    if (!loaded) return;
+    store.saveSources(wsId, current.current);
+    store.setActiveWorkspace(id);
+    past.current = [];
+    future.current = [];
+    setWsId(id);
+    setSources(loaded);
+    setViewId(firstView(loaded));
+    setSelection(undefined);
+    setWorkspaces(store.listWorkspaces());
+  };
+
+  const adopt = async (opened: OpenedFolder) => {
+    const meta = store.createWorkspace(opened.name, opened.sources, opened.handle ? opened.name : undefined);
+    if (opened.handle) await rememberFolder(meta.id, { handle: opened.handle, modelFile: opened.modelFile });
+    switchTo(meta.id, opened.sources);
+    if (opened.handle) setLink({ handle: opened.handle, modelFile: opened.modelFile, ok: true });
+  };
+
+  const openFolderAction = async () => {
+    try {
+      const opened = await openFolder();
+      if (opened) await adopt(opened);
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const importFiles = async (files: FileList) => {
+    try {
+      await adopt(await readPickedFiles(files));
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const saveToFolder = async () => {
+    try {
+      const handle = await pickSaveFolder();
+      if (!handle) return;
+      await writeFolder(handle, sources, MODEL_FILE);
+      await rememberFolder(wsId, { handle, modelFile: MODEL_FILE });
+      store.touch(wsId, { folder: handle.name });
+      setWorkspaces(store.listWorkspaces());
+      setLink({ handle, modelFile: MODEL_FILE, ok: true });
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const reconnect = async () => {
+    if (!link) return;
+    try {
+      if (await ensurePermission(link.handle)) {
+        await writeFolder(link.handle, current.current, link.modelFile);
+        setLink({ ...link, ok: true, error: undefined });
+      }
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const unlink = async () => {
+    await rememberFolder(wsId, undefined);
+    store.touch(wsId, { folder: undefined });
+    setWorkspaces(store.listWorkspaces());
+    setLink(undefined);
+  };
+
+  const activeMeta = workspaces.find((w) => w.id === wsId) ?? workspaces[0]!;
+
   const exports = useMemo(
     () => [
-      { id: 'svg-light', label: 'SVG claro', run: () => diagram.layout && download(`${viewId}.light.svg`, renderSvg(diagram.layout, diagram.workspace.model, { theme: 'light' }), 'image/svg+xml') },
-      { id: 'svg-dark', label: 'SVG oscuro', run: () => diagram.layout && download(`${viewId}.dark.svg`, renderSvg(diagram.layout, diagram.workspace.model, { theme: 'dark' }), 'image/svg+xml') },
+      { id: 'svg-light', label: 'SVG claro', run: () => diagram.layout && download(`${viewId}.light.svg`, renderSvg(diagram.layout, diagram.layoutModel ?? model, { theme: 'light' }), 'image/svg+xml') },
+      { id: 'svg-dark', label: 'SVG oscuro', run: () => diagram.layout && download(`${viewId}.dark.svg`, renderSvg(diagram.layout, diagram.layoutModel ?? model, { theme: 'dark' }), 'image/svg+xml') },
       { id: 'drawio', label: 'draw.io (.drawio)', run: () => { const x = drawioFor(diagram, view?.title ?? viewId); if (x) download(`${viewId}.drawio`, x, 'application/xml'); } },
       { id: 'calm', label: 'Modelo CALM (.yaml)', run: () => download('architecture.calm.yaml', sources.model, 'application/yaml') },
     ],
@@ -272,7 +424,10 @@ export function App() {
     { id: 'tab-model', group: 'Editor', label: 'Editar el modelo CALM', run: () => setTab('model') },
     { id: 'tab-view', group: 'Editor', label: 'Editar la vista actual', run: () => setTab('view') },
     ...exports.map((x) => ({ id: `export-${x.id}`, group: 'Exportar', label: `Exportar ${x.label}`, run: x.run })),
-    { id: 'reset', group: 'Workspace', label: 'Restablecer el ejemplo', run: () => commit(EXAMPLE) },
+    { id: 'new-view', group: 'Vistas', label: 'Nueva vista…', run: () => setDialog({ kind: 'new-view' }) },
+    { id: 'new-ws', group: 'Workspace', label: 'Nuevo workspace…', run: () => setDialog({ kind: 'new-workspace' }) },
+    ...(canLinkFolders ? [{ id: 'open-folder', group: 'Workspace', label: 'Abrir carpeta…', run: openFolderAction }] : []),
+    ...workspaces.filter((w) => w.id !== wsId).map((w) => ({ id: `ws-${w.id}`, group: 'Workspace', label: `Abrir ${w.name}`, run: () => switchTo(w.id) })),
   ];
 
   // ---- Inspector data ------------------------------------------------------------------------
@@ -298,18 +453,53 @@ export function App() {
           <Logo />
           <span className="brand-name">Trazo</span>
           <span className="crumb">/</span>
-          <span className="crumb-ws">{EXAMPLE_NAME}</span>
-          <span className={`save-state${saved ? '' : ' pending'}`} title="Se guarda automáticamente en este navegador">
-            {saved ? <><Check size={13} /> Guardado</> : 'Guardando…'}
-          </span>
+          <WorkspaceMenu
+            workspaces={workspaces}
+            active={activeMeta}
+            canLinkFolders={canLinkFolders}
+            linked={!!link}
+            onSwitch={(id) => id !== wsId && switchTo(id)}
+            onNew={() => setDialog({ kind: 'new-workspace' })}
+            onOpenFolder={openFolderAction}
+            onImportFiles={importFiles}
+            onSaveToFolder={saveToFolder}
+            onUnlink={unlink}
+            onRename={() => setDialog({ kind: 'rename-workspace' })}
+            onDelete={() => setDialog({ kind: 'delete-workspace' })}
+          />
+          {link && !link.ok ? (
+            <button className="save-state reconnect" onClick={reconnect} title={link.error ?? 'El navegador pide permiso de nuevo tras recargar'}>
+              <Folder size={13} /> Reconectar {link.handle.name}
+            </button>
+          ) : (
+            <span className={`save-state${saved ? '' : ' pending'}`} title={link ? `Se guarda en la carpeta ${link.handle.name}` : 'Se guarda automáticamente en este navegador'}>
+              {saved ? <><Check size={13} /> {link ? `Guardado en ${link.handle.name}` : 'Guardado'}</> : 'Guardando…'}
+            </span>
+          )}
         </div>
 
         <nav className="views" aria-label="Vistas">
           {viewIds.map((id) => (
-            <button key={id} className={`view-tab${id === viewId ? ' active' : ''}`} onClick={() => setViewId(id)}>
-              {titleOf(sources.views[id]) ?? id}
-            </button>
+            <span key={id} className={`view-tab${id === viewId ? ' active' : ''}`}>
+              <button onClick={() => setViewId(id)}>{titleOf(sources.views[id]) ?? id}</button>
+              {id === viewId && (
+                <span className="menu-wrap">
+                  <button className="view-more" title="Opciones de la vista" onClick={() => setViewMenu((o) => !o)}><Dots size={14} /></button>
+                  {viewMenu && (
+                    <>
+                      <div className="menu-backdrop" onClick={() => setViewMenu(false)} />
+                      <div className="menu view-menu" role="menu">
+                        <button role="menuitem" onClick={() => { setViewMenu(false); setDialog({ kind: 'rename-view', id }); }}>Renombrar…</button>
+                        <button role="menuitem" onClick={() => { setViewMenu(false); setTab('view'); }}>Editar YAML de la vista</button>
+                        <button role="menuitem" className="danger" disabled={viewIds.length < 2} onClick={() => { setViewMenu(false); setDialog({ kind: 'delete-view', id }); }}>Eliminar vista…</button>
+                      </div>
+                    </>
+                  )}
+                </span>
+              )}
+            </span>
           ))}
+          <button className="view-add" title="Nueva vista" onClick={() => setDialog({ kind: 'new-view' })}><Plus size={15} /></button>
         </nav>
 
         <div className="actions">
@@ -341,15 +531,12 @@ export function App() {
         <section className="panel">
           <div className="panel-tabs">
             <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>
-              architecture.calm.yaml
+              {link?.modelFile ?? MODEL_FILE}
             </button>
             <button className={tab === 'view' ? 'active' : ''} onClick={() => setTab('view')}>
               {viewId}.view.yaml
             </button>
             <span className="grow" />
-            <button className="icon-btn small" title="Restablecer el ejemplo (se puede deshacer)" onClick={() => commit(EXAMPLE)}>
-              <Reset size={14} />
-            </button>
           </div>
           <div className="editor">
             <CodeMirror
@@ -454,6 +641,13 @@ export function App() {
               parent={parents.get(selectedElement.id)}
               containers={containers}
               canNest={!!kind}
+              views={diagram.workspace.views.map((v) => ({
+                id: v.id,
+                title: v.title ?? v.id,
+                all: v.includeAll,
+                shown: v.includeAll || v.include.includes(selectedElement.id),
+              }))}
+              onToggleView={(v, shown) => commit(setInView(sources, v, selectedElement.id, shown))}
               focusName={focusReq.id === selectedElement.id ? focusReq.n : 0}
               onChange={(fields) => commit(updateNode(sources, selectedElement.id, fields))}
               onParent={(p) => kind && commit(setParent(sources, selectedElement.id, p, kind))}
@@ -473,6 +667,19 @@ export function App() {
             />
           )}
 
+          {diagram.layout && diagram.layout.nodes.length === 0 && !diagram.busy && (
+            <div className="empty-state">
+              <h2>{model.elements.size ? 'Esta vista está vacía' : 'Empieza tu diagrama'}</h2>
+              <p>
+                {model.elements.size
+                  ? 'Añade elementos nuevos o marca en el inspector los que ya existen en el modelo.'
+                  : 'Añade elementos y grupos desde la biblioteca, o escribe el modelo CALM a la izquierda.'}
+              </p>
+              <button className="primary-btn" onClick={() => setLibraryOpen(true)}><Shapes size={15} /> Añadir elemento</button>
+              <span className="kbd-hint">o pulsa A</span>
+            </div>
+          )}
+
           <div className="hint">
             {tool === 'connect'
               ? 'Arrastra de un elemento a otro para conectarlos, o a un hueco para crear uno nuevo'
@@ -482,6 +689,86 @@ export function App() {
       </main>
 
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
+
+      {dialog?.kind === 'new-workspace' && (
+        <NewWorkspaceDialog
+          onClose={() => setDialog(undefined)}
+          onCreate={(name, t) => {
+            const meta = store.createWorkspace(name, t.sources);
+            setDialog(undefined);
+            switchTo(meta.id, t.sources);
+          }}
+        />
+      )}
+      {dialog?.kind === 'rename-workspace' && (
+        <RenameDialog
+          title="Renombrar workspace"
+          label="Nombre"
+          value={activeMeta.name}
+          onClose={() => setDialog(undefined)}
+          onSave={(name) => {
+            store.touch(wsId, { name });
+            setWorkspaces(store.listWorkspaces());
+            setDialog(undefined);
+          }}
+        />
+      )}
+      {dialog?.kind === 'delete-workspace' && (
+        <ConfirmDialog
+          title="Eliminar workspace"
+          message={<>Se borra <b>{activeMeta.name}</b> de este navegador.{link ? ' Los ficheros de la carpeta no se tocan.' : ' No se puede deshacer.'}</>}
+          action="Eliminar"
+          onClose={() => setDialog(undefined)}
+          onConfirm={() => {
+            const next = workspaces.find((w) => w.id !== wsId);
+            if (!next) return;
+            const gone = wsId;
+            setDialog(undefined);
+            void rememberFolder(gone, undefined);
+            switchTo(next.id);
+            store.deleteWorkspace(gone);
+            setWorkspaces(store.listWorkspaces());
+          }}
+        />
+      )}
+      {dialog?.kind === 'new-view' && (
+        <NewViewDialog
+          hasElements={model.elements.size > 0}
+          onClose={() => setDialog(undefined)}
+          onCreate={(title, k, empty) => {
+            const id = freshViewId(sources, title);
+            commit({ ...sources, views: { ...sources.views, [id]: viewYaml(title, k, empty ? [] : undefined) } });
+            setViewId(id);
+            setDialog(undefined);
+          }}
+        />
+      )}
+      {dialog?.kind === 'rename-view' && (
+        <RenameDialog
+          title="Renombrar vista"
+          label="Título"
+          value={titleOf(sources.views[dialog.id]) ?? dialog.id}
+          onClose={() => setDialog(undefined)}
+          onSave={(title) => {
+            commit(renameView(sources, dialog.id, title));
+            setDialog(undefined);
+          }}
+        />
+      )}
+      {dialog?.kind === 'delete-view' && (
+        <ConfirmDialog
+          title="Eliminar vista"
+          message={<>Se elimina la vista <b>{titleOf(sources.views[dialog.id]) ?? dialog.id}</b>. Los elementos siguen en el modelo y en las demás vistas. Puedes deshacerlo con ⌘Z.</>}
+          action="Eliminar vista"
+          onClose={() => setDialog(undefined)}
+          onConfirm={() => {
+            const { [dialog.id]: _gone, ...views } = sources.views;
+            commit({ ...sources, views });
+            setDialog(undefined);
+          }}
+        />
+      )}
+      {dialog?.kind === 'error' && <ErrorDialog message={dialog.message} onClose={() => setDialog(undefined)} />}
     </div>
   );
 }

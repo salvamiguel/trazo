@@ -74,18 +74,22 @@ export function Canvas(props: Props) {
   const gesture = useRef<Gesture | null>(null);
   const [live, setLive] = useState<Live>({});
   const fitted = useRef<string>('');
+  /** Set once the user pans or zooms; until then the diagram keeps fitting itself as it grows. */
+  const userMoved = useRef(false);
   const viewRef = useRef(view);
   viewRef.current = view;
 
   const fit = useCallback(() => {
     const box = host.current?.getBoundingClientRect();
     if (!layout || !box) return;
-    const k = Math.min(1.5, Math.max(MIN, Math.min((box.width - 96) / layout.width, (box.height - 96) / layout.height)));
+    const k = Math.min(1, Math.max(MIN, Math.min((box.width - 96) / layout.width, (box.height - 96) / layout.height)));
     setView({ k, x: (box.width - layout.width * k) / 2, y: (box.height - layout.height * k) / 2 });
+    userMoved.current = false;
   }, [layout]);
 
   useLayoutEffect(() => {
-    if (layout && fitKey && fitted.current !== fitKey) {
+    if (!layout || !fitKey) return;
+    if (fitted.current !== fitKey || !userMoved.current) {
       fitted.current = fitKey;
       fit();
     }
@@ -98,6 +102,7 @@ export function Canvas(props: Props) {
       e.preventDefault();
       const box = el.getBoundingClientRect();
       const px = e.clientX - box.left, py = e.clientY - box.top;
+      userMoved.current = true;
       setView((v) => {
         // Like Figma and draw.io: the wheel pans, ctrl/⌘ + wheel (and trackpad pinch) zooms.
         if (!e.ctrlKey && !e.metaKey) return { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY };
@@ -113,6 +118,7 @@ export function Canvas(props: Props) {
     const box = host.current?.getBoundingClientRect();
     if (!box) return;
     const px = box.width / 2, py = box.height / 2;
+    userMoved.current = true;
     setView((v) => {
       const k = Math.min(MAX, Math.max(MIN, v.k * f));
       return { k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k };
@@ -194,6 +200,7 @@ export function Canvas(props: Props) {
       const dx = e.clientX - g.x, dy = e.clientY - g.y;
       if (!g.moved && Math.hypot(dx, dy) < 3) return;
       g.moved = true;
+      userMoved.current = true;
       g.x = e.clientX;
       g.y = e.clientY;
       setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));

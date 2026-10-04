@@ -73,9 +73,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .save-state.pending { color: var(--muted); }
 
 .views { display: flex; gap: 2px; padding: 3px; background: var(--hover); border-radius: 9px; }
-.view-tab { border: 0; background: transparent; padding: 5px 12px; border-radius: 7px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+.view-tab { display: inline-flex; align-items: center; border-radius: 7px; color: var(--muted); white-space: nowrap; }
+.view-tab > button { border: 0; background: transparent; padding: 5px 12px; color: inherit; font-weight: 500; }
 .view-tab:hover { color: var(--fg); }
 .view-tab.active { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.view-tab.active > button { padding-right: 2px; }
+.view-more { display: grid; place-items: center; width: 24px; height: 24px; margin-right: 3px; border: 0; border-radius: 6px; background: none; color: var(--muted); }
+.view-more:hover { background: var(--hover); color: var(--fg); }
+.view-menu { left: -8px; right: auto; top: 30px; }
+.view-add { display: grid; place-items: center; width: 28px; border: 0; border-radius: 7px; background: none; color: var(--muted); }
+.view-add:hover { background: var(--panel); color: var(--fg); }
 
 .actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
 .icon-btn {
@@ -104,7 +111,66 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
 }
 .menu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 6px; }
-.menu button:hover { background: var(--hover); }
+.menu button:hover:not(:disabled) { background: var(--hover); }
+.menu button { display: flex; align-items: center; gap: 8px; }
+.menu button:disabled { opacity: 0.45; cursor: default; }
+.menu button.danger { color: var(--danger); }
+.menu-label { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* Workspace switcher */
+.ws-button {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px;
+  background: none; color: var(--muted); font-weight: 500;
+}
+.ws-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-button:hover { background: var(--hover); color: var(--fg); }
+.ws-menu { left: 0; right: auto; width: 300px; }
+.ws-item .ws-check { width: 14px; display: inline-grid; color: var(--accent); }
+.ws-item .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-item .ws-folder { color: var(--faint); display: inline-grid; }
+.ws-item .ws-when { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.save-state.reconnect { border: 1px solid var(--warn); border-radius: 999px; background: none; color: var(--warn); padding: 2px 8px; }
+
+/* Dialogs */
+.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: rgba(10, 12, 16, 0.4); backdrop-filter: blur(2px); }
+.modal { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.modal > header { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 6px 18px; }
+.modal h2 { margin: 0; font-size: 15px; }
+.modal-body { display: grid; gap: 16px; padding: 10px 18px 18px; }
+.modal-body footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.modal-text { margin: 0; color: var(--muted); line-height: 1.55; }
+.modal-text b { color: var(--fg); }
+.field small { color: var(--faint); font-size: 12px; }
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.choice {
+  display: grid; gap: 3px; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+}
+.choice b { font-weight: 600; }
+.choice span { color: var(--muted); font-size: 12px; }
+.choice:hover { border-color: var(--faint); }
+.choice.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); background: var(--panel); }
+.segmented { display: flex; gap: 2px; padding: 3px; background: var(--hover); border-radius: 9px; }
+.segmented button { flex: 1; border: 0; background: none; padding: 6px 10px; border-radius: 7px; color: var(--muted); font-weight: 500; }
+.segmented button.active { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.danger-solid { height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--danger); color: #fff; font-weight: 600; }
+.danger-solid:focus-visible, .primary-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Inspector: views */
+.view-checks { display: grid; gap: 4px; }
+.view-checks label { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding: 4px 2px; }
+.view-checks label.all { color: var(--muted); }
+.view-checks small { margin-left: auto; color: var(--faint); font-size: 11px; }
+.field .view-checks input { width: auto; flex: none; padding: 0; margin: 0; accent-color: var(--accent); }
+
+/* Empty diagram */
+.empty-state {
+  position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 4; width: min(380px, calc(100% - 32px));
+  display: grid; justify-items: center; gap: 10px; text-align: center; padding: 28px 24px;
+  background: var(--panel); border: 1px dashed var(--faint); border-radius: 14px;
+}
+.empty-state h2 { margin: 0; font-size: 16px; }
+.empty-state p { margin: 0; color: var(--muted); line-height: 1.5; }
 
 /* Workspace */
 .workspace { flex: 1; display: grid; grid-template-columns: minmax(340px, 34%) 1fr; min-height: 0; }

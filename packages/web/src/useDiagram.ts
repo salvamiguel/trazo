@@ -7,6 +7,7 @@ import {
   renderSvg,
   type Diagnostic,
   type Layout,
+  type Model,
   type QualityMetrics,
   type ThemeName,
   type Workspace,
@@ -16,6 +17,8 @@ import {
 export interface DiagramState {
   workspace: Workspace;
   layout?: Layout;
+  /** Model the layout was computed from (may trail `workspace.model`). */
+  layoutModel?: Model;
   /** View the current layout belongs to; lags behind the selected view while layout runs. */
   layoutView?: string;
   svg?: string;
@@ -39,7 +42,7 @@ export function useDiagram(sources: WorkspaceSources, viewId: string, theme: The
   const workspace = useMemo(() => parseWorkspace(debounced), [debounced]);
   const view = workspace.views.find((v) => v.id === viewId) ?? workspace.views[0];
 
-  const [result, setResult] = useState<{ layout?: Layout; viewId?: string; extra: Diagnostic[]; error?: string }>({ extra: [] });
+  const [result, setResult] = useState<{ layout?: Layout; model?: Model; viewId?: string; extra: Diagnostic[]; error?: string }>({ extra: [] });
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -50,7 +53,7 @@ export function useDiagram(sources: WorkspaceSources, viewId: string, theme: The
     setBusy(true);
     layoutModelView(workspace.model, view)
       .then(({ layout, graph }) => {
-        if (!cancelled) setResult({ layout, viewId: view.id, extra: graph.diagnostics });
+        if (!cancelled) setResult({ layout, model: workspace.model, viewId: view.id, extra: graph.diagnostics });
       })
       .catch((err: unknown) => {
         if (!cancelled) setResult((r) => ({ ...r, error: err instanceof Error ? err.message : String(err) }));
@@ -62,8 +65,10 @@ export function useDiagram(sources: WorkspaceSources, viewId: string, theme: The
   }, [workspace, view]);
 
   const svg = useMemo(
-    () => (result.layout ? renderSvg(result.layout, workspace.model, { theme, title: view?.title ?? view?.id }) : undefined),
-    [result.layout, workspace.model, theme, view],
+    // Render with the model the layout was computed from: while a new layout runs, the
+    // current model may already lack elements the old layout still draws.
+    () => (result.layout && result.model ? renderSvg(result.layout, result.model, { theme, title: view?.title ?? view?.id }) : undefined),
+    [result.layout, result.model, theme, view],
   );
   const metrics = useMemo(() => (result.layout ? measureLayout(result.layout) : undefined), [result.layout]);
   const diagnostics = [
@@ -71,9 +76,9 @@ export function useDiagram(sources: WorkspaceSources, viewId: string, theme: The
     ...result.extra,
     ...(result.error ? [{ level: 'error' as const, message: `Layout: ${result.error}` }] : []),
   ];
-  return { workspace, layout: result.layout, layoutView: result.viewId, svg, metrics, diagnostics, busy };
+  return { workspace, layout: result.layout, layoutModel: result.model, layoutView: result.viewId, svg, metrics, diagnostics, busy };
 }
 
 export function drawioFor(state: DiagramState, name: string): string | undefined {
-  return state.layout ? exportDrawio(state.layout, state.workspace.model, name) : undefined;
+  return state.layout && state.layoutModel ? exportDrawio(state.layout, state.layoutModel, name) : undefined;
 }

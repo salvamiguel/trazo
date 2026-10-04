@@ -50,6 +50,13 @@ function seqOf(doc: Document, key: string): YAMLSeq {
   return seq as YAMLSeq;
 }
 
+/** Appends to a top-level list, switching `[]` written inline to block style first. */
+function push(doc: Document, key: string, item: unknown) {
+  const seq = seqOf(doc, key);
+  if (seq.flow) seq.flow = false;
+  seq.items.push(item);
+}
+
 function items(doc: Document, key: string): YAMLMap[] {
   return seqOf(doc, key).items.filter(isMap) as YAMLMap[];
 }
@@ -182,7 +189,7 @@ function attach(doc: Document, ids: string[], container: string, kind: Containme
   }) as YAMLMap;
   const body = (rel.get('relationship-type') as YAMLMap).get(kind) as YAMLMap;
   body.flow = true;
-  seqOf(doc, 'relationships').items.push(rel);
+  push(doc, 'relationships', rel);
 }
 
 function isDescendant(doc: Document, id: string, ancestor: string, kind: ContainmentKind): boolean {
@@ -204,7 +211,7 @@ export function addNode(sources: WorkspaceSources, viewId: string, node: NewNode
   const id = freshId(doc, node.name);
   const map = doc.createNode({ 'unique-id': id, 'node-type': node['node-type'], name: node.name, description: node.description ?? '' }) as YAMLMap;
   applyNodeFields(doc, map, { technology: node.technology, icon: node.icon, 'group-style': node['group-style'], c4: node.c4 });
-  seqOf(doc, 'nodes').items.push(map);
+  push(doc, 'nodes', map);
   if (parent && kind) attach(doc, [id], parent, kind);
   return { sources: { model: print(doc), views: includeInView(sources.views, viewId, id) }, id };
 }
@@ -245,7 +252,7 @@ export function addRelationship(
   }) as YAMLMap;
   const body = typeOf(rel)!.body;
   body.flow = true;
-  seqOf(doc, 'relationships').items.push(rel);
+  push(doc, 'relationships', rel);
   return { sources: { ...sources, model: print(doc) }, id };
 }
 
@@ -328,21 +335,44 @@ export function deleteNode(sources: WorkspaceSources, id: string): WorkspaceSour
   return { model: print(doc), views };
 }
 
-function includeInView(views: Record<string, string>, viewId: string, id: string): Record<string, string> {
+export function includeInView(views: Record<string, string>, viewId: string, id: string): Record<string, string> {
   const text = views[viewId];
   if (text === undefined) return views;
   const doc = parseDocument(text);
   const include = doc.get('include');
-  // An empty or missing include list already means "everything".
-  if (!isSeq(include) || include.items.length === 0) return views;
+  // A view without an include list already shows everything.
+  if (!isSeq(include) || strings(include).includes(id)) return views;
   include.add(doc.createNode(id));
   return { ...views, [viewId]: print(doc) };
 }
 
-function excludeFromView(text: string, id: string): string {
+export function excludeFromView(text: string, id: string): string {
   const doc = parseDocument(text);
   const include = doc.get('include');
   if (!isSeq(include) || !strings(include).includes(id)) return text;
   include.items = include.items.filter((i) => String((i as { value?: unknown })?.value ?? i) !== id);
   return print(doc);
+}
+
+/** Shows or hides an element in a view that lists its elements explicitly. */
+export function setInView(sources: WorkspaceSources, viewId: string, id: string, shown: boolean): WorkspaceSources {
+  const text = sources.views[viewId];
+  if (text === undefined) return sources;
+  const views = shown ? includeInView(sources.views, viewId, id) : { ...sources.views, [viewId]: excludeFromView(text, id) };
+  return { ...sources, views };
+}
+
+export function renameView(sources: WorkspaceSources, viewId: string, title: string): WorkspaceSources {
+  const text = sources.views[viewId];
+  if (text === undefined) return sources;
+  const doc = parseDocument(text);
+  doc.set('title', title);
+  return { ...sources, views: { ...sources.views, [viewId]: print(doc) } };
+}
+
+/** A file-safe id for a new view, unique within the workspace. */
+export function freshViewId(sources: WorkspaceSources, title: string): string {
+  const root = slug(title);
+  if (!(root in sources.views)) return root;
+  for (let i = 2; ; i++) if (!(`${root}-${i}` in sources.views)) return `${root}-${i}`;
 }

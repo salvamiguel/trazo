@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseWorkspace, type WorkspaceSources } from '@trazo/core';
-import { addNode, addRelationship, deleteNode, deleteRelationship, reverseRelationship, setParent, updateNode, updateRelationship } from '../src/edit.ts';
+import { addNode, addRelationship, deleteNode, deleteRelationship, freshViewId, renameView, reverseRelationship, setInView, setParent, updateNode, updateRelationship } from '../src/edit.ts';
 
 const dir = new URL('../../../examples/aws-pagos/', import.meta.url);
 const read = (f: string) => readFileSync(new URL(f, dir), 'utf8');
@@ -84,5 +84,28 @@ describe('edits on the CALM model', () => {
     expect(ws.model.relationships.some((r) => r.source === 'payments-api' || r.target === 'payments-api')).toBe(false);
     expect(ws.views.find((v) => v.id === 'contenedores-c4')?.include).not.toContain('payments-api');
     expect(errorsOf(t)).toEqual([]);
+  });
+});
+
+describe('views', () => {
+  it('shows and hides elements in a view with an include list', () => {
+    let s = setInView(base, 'contenedores-c4', 'secretos', true);
+    expect(parseWorkspace(s).views.find((v) => v.id === 'contenedores-c4')?.include).toContain('secretos');
+    s = setInView(s, 'contenedores-c4', 'secretos', false);
+    expect(parseWorkspace(s).views.find((v) => v.id === 'contenedores-c4')?.include).not.toContain('secretos');
+    // A view without a list shows everything and is left alone.
+    expect(setInView(base, 'infra-aws', 'secretos', false)).toEqual(base);
+  });
+
+  it('keeps an emptied view empty instead of showing everything', () => {
+    const s = { ...base, views: { solo: 'title: Solo\ninclude: [clientes]\n' } };
+    const view = parseWorkspace(setInView(s, 'solo', 'clientes', false)).views[0]!;
+    expect(view.includeAll).toBe(false);
+    expect(view.include).toEqual([]);
+  });
+
+  it('renames a view and finds free ids', () => {
+    expect(parseWorkspace(renameView(base, 'infra-aws', 'Red de pagos')).views.find((v) => v.id === 'infra-aws')?.title).toBe('Red de pagos');
+    expect(freshViewId(base, 'Infra AWS')).toBe('infra-aws-2');
   });
 });

@@ -19,6 +19,8 @@ export function loadView(id: string, text: string): { view: View; diagnostics: D
       preset: typeof raw.preset === 'string' ? raw.preset : undefined,
       hierarchy,
       include: Array.isArray(raw.include) ? raw.include.map(String) : [],
+      // No list means every element; an explicit empty list is a view that starts empty.
+      includeAll: !Array.isArray(raw.include),
       direction,
     },
     diagnostics,
@@ -42,7 +44,7 @@ export function projectView(model: Model, view: View): ViewGraph {
     view.hierarchy === 'deployment' ? model.deployedIn : view.hierarchy === 'composition' ? model.composedOf : new Map<string, string>();
 
   const visible = new Set<string>();
-  if (view.include.length === 0) {
+  if (view.includeAll) {
     for (const id of model.elements.keys()) visible.add(id);
   } else {
     for (const id of view.include) {
@@ -73,7 +75,7 @@ export function projectView(model: Model, view: View): ViewGraph {
     if (model.elements.get(id)?.groupStyle && !otherContainers.has(id)) groups.add(id);
   }
   const elements = [...visible]
-    .filter((id) => groups.has(id) || !(view.include.length === 0 && otherContainers.has(id) && !parents.has(id) && !hasEdges(model, id)))
+    .filter((id) => groups.has(id) || !(view.includeAll && otherContainers.has(id) && !parents.has(id) && !hasEdges(model, id)))
     .map((id) => model.elements.get(id)!);
   const shown = new Set(elements.map((e) => e.id));
 
