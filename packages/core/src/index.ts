@@ -6,6 +6,8 @@ export { layoutView, ICON_SIZE } from './layout/elk.ts';
 export { measureLayout, type QualityMetrics } from './layout/metrics.ts';
 export type * from './layout/types.ts';
 export { renderSvg } from './render/svg.ts';
+export { getIcon, iconIds, resolveIconId } from './icons/registry.ts';
+export { GROUP_ICONS } from './icons/groups.ts';
 export { THEMES, type ThemeName } from './render/theme.ts';
 export { exportDrawio } from './export/drawio.ts';
 

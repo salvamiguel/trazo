@@ -68,6 +68,10 @@ export function projectView(model: Model, view: View): ViewGraph {
   // when they belong to the other hierarchy, e.g. a C4 system in a deployment view.
   const otherParents = view.hierarchy === 'deployment' ? model.composedOf : model.deployedIn;
   const otherContainers = new Set(otherParents.values());
+  // A box with a group style is still drawn as a group while empty (e.g. a VPC just added in the editor).
+  for (const id of visible) {
+    if (model.elements.get(id)?.groupStyle && !otherContainers.has(id)) groups.add(id);
+  }
   const elements = [...visible]
     .filter((id) => groups.has(id) || !(view.include.length === 0 && otherContainers.has(id) && !parents.has(id) && !hasEdges(model, id)))
     .map((id) => model.elements.get(id)!);

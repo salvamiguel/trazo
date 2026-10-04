@@ -13,6 +13,8 @@ import type { Model } from '../model/types.ts';
 const ELK = ElkBundled as unknown as new (args?: ELKConstructorArguments) => ElkInstance;
 
 export const ICON_SIZE = 56;
+/** Id prefix of layout-only edges that are never drawn. */
+const TIE = '__tie:';
 const LABEL_MAX_WIDTH = 150;
 const GROUP_PADDING = { top: 40, left: 20, bottom: 20, right: 20 };
 const OVERLAY_PADDING = { top: 34, side: 14 };
@@ -143,6 +145,11 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     return p;
   };
 
+  const overlayOf = (id: string) => {
+    for (let p = graph.parent.get(id); p; p = graph.parent.get(p)) if (rules.overlays.has(p)) return p;
+    return undefined;
+  };
+
   for (const e of graph.elements) {
     if (rules.overlays.has(e.id)) continue;
     const parentId = elkParent(e.id);
@@ -154,9 +161,28 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     // Partitioning is a per-graph option in ELK: enable it on every level.
     for (const container of [root, ...[...elkNodes.values()].filter((n) => n.children)]) {
       container.layoutOptions!['elk.partitioning.activate'] = 'true';
+      // A group with no edges (e.g. a subnet whose services all moved away) would be packed
+      // as a separate component, outside its tier column.
+      container.layoutOptions!['elk.separateConnectedComponents'] = 'false';
     }
     for (const [id, partition] of rules.partitions) {
       elkNodes.get(id)!.layoutOptions!['elk.partitioning.partition'] = String(partition);
+    }
+  }
+  if (rules.overlays.size) {
+    // Overlay rows (AZs) must keep their model order in every column, or a frame ends up
+    // wrapped around another one. ELK keeps the in-layer order given by elk.position.
+    for (const id of rules.overlays) {
+      const host = elkParent(id);
+      (host ? elkNodes.get(host)! : root).layoutOptions!['elk.layered.crossingMinimization.semiInteractive'] = 'true';
+    }
+    const ordered = graph.elements.filter((e) => rules.overlays.has(e.id)).map((e) => e.id);
+    for (const e of graph.elements) {
+      if (rules.overlays.has(e.id)) continue;
+      const row = ordered.indexOf(overlayOf(e.id) ?? '');
+      if (row >= 0 && rules.overlays.has(graph.parent.get(e.id) ?? '')) {
+        elkNodes.get(e.id)!.layoutOptions!['elk.position'] = `(0,${row * 1000})`;
+      }
     }
   }
   for (const id of rules.overlays) {
@@ -175,10 +201,6 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
   // Edges between the same tier of different overlays (e.g. Aurora writer in AZ A → reader in
   // AZ B) would push one AZ after the other; ELK ignores them and they are routed afterwards.
   const manual = new Set<string>();
-  const overlayOf = (id: string) => {
-    for (let p = graph.parent.get(id); p; p = graph.parent.get(p)) if (rules.overlays.has(p)) return p;
-    return undefined;
-  };
   if (rules.partitions) {
     for (const r of graph.relationships) {
       const [a, b] = siblingAncestors(r.source, r.target, elkParent);
@@ -204,6 +226,22 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
       labels: lines.length ? [{ id: `${r.id}__label`, text, ...measure(lines) }] : [],
     };
     root.edges!.push(edge);
+  }
+
+  // Invisible ties chain the subnets of each AZ in tier order. Without them a subnet whose
+  // services all talk across AZs has no edges, and ELK packs it outside its tier column.
+  if (rules.partitions) {
+    for (const az of rules.overlays) {
+      const row = graph.elements
+        .filter((e) => graph.parent.get(e.id) === az && !rules.overlays.has(e.id))
+        .sort((a, b) => (rules.partitions!.get(a.id) ?? 0) - (rules.partitions!.get(b.id) ?? 0));
+      for (let i = 1; i < row.length; i++) {
+        const [a, b] = [row[i - 1]!.id, row[i]!.id];
+        if ((rules.partitions.get(a) ?? 0) === (rules.partitions.get(b) ?? 0)) continue;
+        const tie = (id: string) => (graph.groups.has(id) ? id : portFor(elkNodes.get(id)!, `${TIE}${a}-${b}-${id}`, id === a ? sides.out : sides.in, false));
+        root.edges!.push({ id: `${TIE}${a}-${b}`, sources: [tie(a)], targets: [tie(b)] });
+      }
+    }
   }
 
   // Overlay frames are drawn after layout; if two of them collide, widen the spacing of
@@ -252,7 +290,7 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
   const collectEdges = (n: ElkNode) => {
     for (const e of (n.edges ?? []) as ElkExtendedEdge[]) {
       const section = e.sections?.[0];
-      if (!section) continue;
+      if (!section || e.id.startsWith(TIE)) continue;
       const points: Point[] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({ x: p.x, y: p.y }));
       if (reversed.has(e.id)) points.reverse();
       const rel = graph.relationships.find((r) => r.id === e.id)!;

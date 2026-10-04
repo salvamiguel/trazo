@@ -85,3 +85,10 @@ export function getIcon(ref: string | undefined): IconSvg | null {
   cache.set(id, icon);
   return icon;
 }
+
+/** Every icon id the registry can draw (`prefix:name`), for pickers and search. */
+export function iconIds(): string[] {
+  return Object.entries(sets).flatMap(([prefix, set]) =>
+    [...Object.keys(set.icons), ...Object.keys(set.aliases ?? {})].map((name) => `${prefix}:${name}`),
+  );
+}

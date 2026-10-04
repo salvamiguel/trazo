@@ -1,45 +1,95 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { Layout, PlacedEdge, PlacedNode, Point } from '@trazo/core';
+import { DRAG_TYPE } from './Library.tsx';
 import { Fit, Minus, Plus } from './icons.tsx';
+
+export type Tool = 'select' | 'connect';
+export type Selection = { kind: 'node' | 'edge'; id: string };
 
 interface Props {
   svg?: string;
+  layout?: Layout;
   /** Changes when the diagram should be re-fitted (e.g. another view). */
   fitKey: string;
   busy: boolean;
-  selected?: string;
-  onSelect: (id: string | undefined) => void;
+  tool: Tool;
+  selection?: Selection;
+  /** Whether the view nests elements (false when its hierarchy is "none"). */
+  canNest: boolean;
+  onSelect: (sel: Selection | undefined) => void;
+  onOpen: (id: string) => void;
+  onConnect: (source: string, target: string) => void;
+  /** A connection dropped on empty space: the app asks what to create there. */
+  onConnectToEmpty: (source: string, screen: Point, group: string | undefined) => void;
+  onReparent: (id: string, group: string | undefined) => void;
+  onDropEntry: (key: string, group: string | undefined) => void;
 }
 
 const MIN = 0.1;
 const MAX = 4;
+const HANDLE_R = 9;
 
-/** Pan (drag) and zoom (wheel / pinch / buttons) over the rendered SVG. */
-export function Canvas({ svg, fitKey, busy, selected, onSelect }: Props) {
+type Gesture =
+  | { kind: 'pan'; x: number; y: number; moved: boolean; startedOn?: Selection }
+  | { kind: 'node'; id: string; grab: Point; start: Point; moved: boolean }
+  | { kind: 'connect'; from: string };
+
+interface Live {
+  /** Pointer in diagram coordinates during a gesture. */
+  at?: Point;
+  /** Element the gesture would land on (connect target or group). */
+  target?: string;
+  dragging?: string;
+  connecting?: string;
+  hover?: string;
+}
+
+/** Icon plus label: what a reader sees as "the element". */
+function outline(n: PlacedNode) {
+  if (n.isGroup) return { x: n.x, y: n.y, width: n.width, height: n.height };
+  const x1 = Math.min(n.x, n.label.x), y1 = Math.min(n.y, n.label.y);
+  const x2 = Math.max(n.x + n.width, n.label.x + n.label.width), y2 = Math.max(n.y + n.height, n.label.y + n.label.height);
+  return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+}
+
+const inside = (p: Point, b: { x: number; y: number; width: number; height: number }, pad = 0) =>
+  p.x >= b.x - pad && p.x <= b.x + b.width + pad && p.y >= b.y - pad && p.y <= b.y + b.height + pad;
+
+function segDistance(p: Point, a: Point, b: Point) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const t = dx || dy ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy))) : 0;
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+function handleOf(n: PlacedNode): Point {
+  return n.isGroup ? { x: n.x + n.width, y: n.y + n.height / 2 } : { x: n.x + n.width + 14, y: n.y + n.height / 2 };
+}
+
+/** Pan and zoom over the rendered SVG, plus the editing gestures drawn on an overlay. */
+export function Canvas(props: Props) {
+  const { svg, layout, fitKey, busy, tool, selection, canNest } = props;
   const host = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ x: 0, y: 0, k: 1 });
-  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const gesture = useRef<Gesture | null>(null);
+  const [live, setLive] = useState<Live>({});
   const fitted = useRef<string>('');
-
-  const size = useCallback(() => {
-    const el = content.current?.querySelector('svg');
-    return el ? { w: Number(el.getAttribute('width')), h: Number(el.getAttribute('height')) } : undefined;
-  }, []);
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const fit = useCallback(() => {
-    const s = size();
     const box = host.current?.getBoundingClientRect();
-    if (!s || !box) return;
-    const k = Math.min(MAX, Math.max(MIN, Math.min((box.width - 64) / s.w, (box.height - 64) / s.h)));
-    setView({ k, x: (box.width - s.w * k) / 2, y: (box.height - s.h * k) / 2 });
-  }, [size]);
+    if (!layout || !box) return;
+    const k = Math.min(1.5, Math.max(MIN, Math.min((box.width - 96) / layout.width, (box.height - 96) / layout.height)));
+    setView({ k, x: (box.width - layout.width * k) / 2, y: (box.height - layout.height * k) / 2 });
+  }, [layout]);
 
   useLayoutEffect(() => {
-    if (svg && fitted.current !== fitKey) {
+    if (layout && fitKey && fitted.current !== fitKey) {
       fitted.current = fitKey;
       fit();
     }
-  }, [svg, fitKey, fit]);
+  }, [layout, fitKey, fit]);
 
   useEffect(() => {
     const el = host.current;
@@ -69,41 +119,203 @@ export function Canvas({ svg, fitKey, busy, selected, onSelect }: Props) {
     });
   };
 
+  // ---- Geometry in diagram coordinates ----------------------------------------------------
+  const toDiagram = (clientX: number, clientY: number): Point => {
+    const box = host.current!.getBoundingClientRect();
+    const v = viewRef.current;
+    return { x: (clientX - box.left - v.x) / v.k, y: (clientY - box.top - v.y) / v.k };
+  };
+  const byId = new Map((layout?.nodes ?? []).map((n) => [n.id, n]));
+  const isWithin = (id: string, ancestor: string) => {
+    for (let p: string | undefined = id; p; p = byId.get(p)?.parent) if (p === ancestor) return true;
+    return false;
+  };
+  const nodeAt = (p: Point): PlacedNode | undefined => {
+    const nodes = layout?.nodes ?? [];
+    const leaf = nodes.find((n) => !n.isGroup && inside(p, outline(n), 4));
+    if (leaf) return leaf;
+    return groupAt(p);
+  };
+  const groupAt = (p: Point, exclude?: string): PlacedNode | undefined =>
+    (layout?.nodes ?? [])
+      .filter((n) => n.isGroup && inside(p, n) && !(exclude && isWithin(n.id, exclude)))
+      .sort((a, b) => a.width * a.height - b.width * b.height)[0];
+  const edgeAt = (p: Point): PlacedEdge | undefined => {
+    const tol = 6 / viewRef.current.k;
+    return layout?.edges.find((e) => e.points.some((a, i) => i > 0 && segDistance(p, e.points[i - 1]!, a) < tol));
+  };
+  const selectedNode = selection?.kind === 'node' ? byId.get(selection.id) : undefined;
+  const onHandle = (p: Point) => {
+    if (!selectedNode) return false;
+    const h = handleOf(selectedNode);
+    return Math.hypot(p.x - h.x, p.y - h.y) <= (HANDLE_R + 4) / viewRef.current.k;
+  };
+
+  // ---- Gestures --------------------------------------------------------------------------
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 || !layout) return;
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    const p = toDiagram(e.clientX, e.clientY);
+    if (onHandle(p) && selectedNode) {
+      gesture.current = { kind: 'connect', from: selectedNode.id };
+      setLive({ connecting: selectedNode.id, at: p });
+      return;
+    }
+    const node = nodeAt(p);
+    if (node && tool === 'connect') {
+      gesture.current = { kind: 'connect', from: node.id };
+      setLive({ connecting: node.id, at: p });
+      return;
+    }
+    // Groups are dragged by their title bar; their body pans like empty canvas.
+    const grabbable = node && (!node.isGroup || p.y - node.y < 34);
+    if (node && grabbable) {
+      gesture.current = { kind: 'node', id: node.id, grab: p, start: { x: e.clientX, y: e.clientY }, moved: false };
+      return;
+    }
+    const edge = edgeAt(p);
+    gesture.current = {
+      kind: 'pan', x: e.clientX, y: e.clientY, moved: false,
+      startedOn: edge ? { kind: 'edge', id: edge.id } : node ? { kind: 'node', id: node.id } : undefined,
+    };
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    const p = layout && host.current ? toDiagram(e.clientX, e.clientY) : undefined;
+    if (!g) {
+      if (p) {
+        const hover = onHandle(p) ? '__handle' : (nodeAt(p)?.id ?? (edgeAt(p) ? '__edge' : undefined));
+        if (hover !== live.hover) setLive({ hover });
+      }
+      return;
+    }
+    if (g.kind === 'pan') {
+      const dx = e.clientX - g.x, dy = e.clientY - g.y;
+      if (!g.moved && Math.hypot(dx, dy) < 3) return;
+      g.moved = true;
+      g.x = e.clientX;
+      g.y = e.clientY;
+      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      return;
+    }
+    if (!p) return;
+    if (g.kind === 'node') {
+      if (!g.moved && Math.hypot(e.clientX - g.start.x, e.clientY - g.start.y) < 4) return;
+      if (!canNest) return;
+      g.moved = true;
+      setLive({ dragging: g.id, at: p, target: groupAt(p, g.id)?.id });
+      return;
+    }
+    const over = nodeAt(p);
+    setLive({ connecting: g.from, at: p, target: over && over.id !== g.from ? over.id : undefined });
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    const g = gesture.current;
+    gesture.current = null;
+    setLive({});
+    if (!g || !layout) return;
+    const p = toDiagram(e.clientX, e.clientY);
+    if (g.kind === 'pan') {
+      if (!g.moved) props.onSelect(g.startedOn);
+      return;
+    }
+    if (g.kind === 'node') {
+      if (!g.moved) return props.onSelect({ kind: 'node', id: g.id });
+      const target = groupAt(p, g.id)?.id;
+      if (target !== byId.get(g.id)?.parent) props.onReparent(g.id, target);
+      return;
+    }
+    const over = nodeAt(p);
+    if (over && over.id !== g.from) return props.onConnect(g.from, over.id);
+    if (!over) {
+      const box = host.current!.getBoundingClientRect();
+      props.onConnectToEmpty(g.from, { x: e.clientX - box.left, y: e.clientY - box.top }, groupAt(p)?.id);
+    }
+  };
+
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const k = view.k;
+
+  // ---- Overlay -----------------------------------------------------------------------------
+  const overlay = layout && (
+    <svg className="overlay" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`}>
+      {(() => {
+        const t = live.target ?? dropTarget ?? undefined;
+        const n = t ? byId.get(t) : undefined;
+        if (!n) return null;
+        const b = outline(n);
+        return <rect className="ov-target" x={b.x - 4} y={b.y - 4} width={b.width + 8} height={b.height + 8} rx={10} strokeWidth={2 / k} />;
+      })()}
+      {selection?.kind === 'edge' && (() => {
+        const edge = layout.edges.find((e) => e.id === selection.id);
+        return edge ? <polyline className="ov-edge" points={edge.points.map((q) => `${q.x},${q.y}`).join(' ')} strokeWidth={4 / k} /> : null;
+      })()}
+      {selectedNode && !live.dragging && (() => {
+        const b = outline(selectedNode);
+        const h = handleOf(selectedNode);
+        return (
+          <>
+            <rect className="ov-select" x={b.x - 5} y={b.y - 5} width={b.width + 10} height={b.height + 10} rx={selectedNode.isGroup ? 9 : 14} strokeWidth={2 / k} />
+            <g className={`ov-handle${live.hover === '__handle' ? ' hot' : ''}`} transform={`translate(${h.x} ${h.y}) scale(${1 / k})`}>
+              <circle r={HANDLE_R} />
+              <path d="M-4 0h8M0 -4v8" />
+            </g>
+          </>
+        );
+      })()}
+      {live.dragging && live.at && (() => {
+        const n = byId.get(live.dragging);
+        if (!n) return null;
+        const w = n.isGroup ? Math.min(n.width, 220) : n.width, h = n.isGroup ? 34 : n.height;
+        return <rect className="ov-ghost" x={live.at.x - w / 2} y={live.at.y - h / 2} width={w} height={h} rx={12} strokeWidth={1.5 / k} />;
+      })()}
+      {live.connecting && live.at && (() => {
+        const n = byId.get(live.connecting);
+        if (!n) return null;
+        const from = n.isGroup ? handleOf(n) : { x: n.x + n.width / 2, y: n.y + n.height / 2 };
+        return <line className="ov-wire" x1={from.x} y1={from.y} x2={live.at.x} y2={live.at.y} strokeWidth={2 / k} strokeDasharray={`${6 / k} ${4 / k}`} />;
+      })()}
+    </svg>
+  );
+
+  const cursor = live.connecting ? 'crosshair' : live.dragging ? 'grabbing' : live.hover === '__handle' ? 'crosshair' : tool === 'connect' ? (live.hover ? 'crosshair' : 'grab') : live.hover ? 'pointer' : 'grab';
+
   return (
     <div
       ref={host}
-      className={`canvas${drag.current ? ' dragging' : ''}`}
-      onPointerDown={(e) => {
-        drag.current = { x: e.clientX, y: e.clientY, moved: false };
-        (e.target as Element).setPointerCapture?.(e.pointerId);
+      className="canvas"
+      style={{ cursor }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={() => !gesture.current && live.hover && setLive({})}
+      onDoubleClick={(e) => {
+        if (!layout) return;
+        const n = nodeAt(toDiagram(e.clientX, e.clientY));
+        if (n) props.onOpen(n.id);
       }}
-      onPointerMove={(e) => {
-        const d = drag.current;
-        if (!d) return;
-        const dx = e.clientX - d.x, dy = e.clientY - d.y;
-        if (!d.moved && Math.hypot(dx, dy) < 3) return;
-        d.moved = true;
-        d.x = e.clientX;
-        d.y = e.clientY;
-        setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(DRAG_TYPE) || !layout) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        const g = canNest ? groupAt(toDiagram(e.clientX, e.clientY))?.id ?? null : null;
+        if (g !== dropTarget) setDropTarget(g);
       }}
-      onPointerUp={(e) => {
-        const d = drag.current;
-        drag.current = null;
-        if (d && !d.moved) {
-          const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-id]');
-          const id = target?.getAttribute('data-id');
-          onSelect(id ?? undefined);
-        }
+      onDragLeave={() => setDropTarget(null)}
+      onDrop={(e) => {
+        const key = e.dataTransfer.getData(DRAG_TYPE);
+        setDropTarget(null);
+        if (!key) return;
+        e.preventDefault();
+        props.onDropEntry(key, canNest && layout ? groupAt(toDiagram(e.clientX, e.clientY))?.id : undefined);
       }}
     >
-      {selected && <style>{`.canvas-content [data-id="${CSS.escape(selected)}"] { filter: drop-shadow(0 0 0.5px var(--accent)) drop-shadow(0 0 6px var(--accent)); }`}</style>}
-      <div
-        ref={content}
-        className="canvas-content"
-        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
-        dangerouslySetInnerHTML={svg ? { __html: svg } : undefined}
-      />
+      <div className="canvas-content" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+        <div ref={content} dangerouslySetInnerHTML={svg ? { __html: svg } : undefined} />
+        {overlay}
+      </div>
       {!svg && <div className="canvas-empty">{busy ? 'Calculando layout…' : 'Corrige los errores del modelo para ver el diagrama'}</div>}
       <div className="zoom" onPointerDown={(e) => e.stopPropagation()}>
         <button className="icon-btn" title="Alejar" onClick={() => zoomBy(1 / 1.25)}><Minus /></button>

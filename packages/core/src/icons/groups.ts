@@ -5,7 +5,7 @@ import { getIcon } from './registry.ts';
  * Header icon per group style, following the AWS architecture group conventions
  * (availability zones and generic groups have none). `metadata.trazo.icon` overrides it.
  */
-const GROUP_ICONS: Partial<Record<GroupStyle, string>> = {
+export const GROUP_ICONS: Partial<Record<GroupStyle, string>> = {
   'aws-cloud': 'tabler:brand-aws',
   'aws-account': 'tabler:user-square',
   'aws-region': 'tabler:flag',

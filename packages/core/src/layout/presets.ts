@@ -34,7 +34,9 @@ export function presetRules(preset: string | undefined, graph: ViewGraph, model:
     return undefined;
   };
 
-  const leaves = graph.elements.filter((e) => !graph.groups.has(e.id));
+  // Leaves are whatever has no children here, including a group box that is still empty.
+  const parentsInView = new Set(graph.parent.values());
+  const leaves = graph.elements.filter((e) => !parentsInView.has(e.id));
   const inSubnet = new Set(leaves.filter((e) => subnetTier(e.id) !== undefined).map((e) => e.id));
   const adjacency = new Map<string, string[]>();
   for (const r of graph.relationships) adjacency.set(r.source, [...(adjacency.get(r.source) ?? []), r.target]);
@@ -55,15 +57,16 @@ export function presetRules(preset: string | undefined, graph: ViewGraph, model:
   for (const e of leaves) leafTiers.set(e.id, explicit.get(e.id) ?? subnetTier(e.id) ?? (reachesSubnet(e.id) ? 0 : 3));
 
   // Availability zones are rows across the subnet-tier columns, not boxes in the flow.
-  const overlays = new Set(graph.elements.filter((e) => style(e.id) === 'aws-az' && graph.groups.has(e.id)).map((e) => e.id));
+  const overlays = new Set(graph.elements.filter((e) => style(e.id) === 'aws-az' && [...graph.parent.values()].includes(e.id)).map((e) => e.id));
   return { partitions: propagate(leafTiers, graph), overlays };
 }
 
 /** Gives every group the lowest partition among its descendants, so siblings compare correctly. */
 function propagate(leafPartitions: Map<string, number>, graph: ViewGraph): Map<string, number> {
   const result = new Map<string, number>();
+  const parentsInView = new Set(graph.parent.values());
   for (const e of graph.elements) {
-    if (graph.groups.has(e.id)) continue;
+    if (parentsInView.has(e.id)) continue;
     const p = leafPartitions.get(e.id) ?? 0;
     for (let cur: string | undefined = e.id; cur; cur = graph.parent.get(cur)) {
       result.set(cur, Math.min(result.get(cur) ?? Infinity, p));

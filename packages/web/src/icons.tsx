@@ -19,3 +19,13 @@ export const Logo = ({ size = 22 }: P) => (
     <circle cx="24" cy="10" r="2.5" fill="#fff" />
   </svg>
 );
+export const Close = ({ size }: P) => (<svg {...base(size)}><path d="M6 6l12 12M18 6L6 18" /></svg>);
+export const Search = ({ size }: P) => (<svg {...base(size)}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>);
+export const Pointer = ({ size }: P) => (<svg {...base(size)}><path d="M6 3l12 9-5.5 1.2L15 20l-2.6 1.1-2.6-6.6L6 18z" /></svg>);
+export const Connect = ({ size }: P) => (<svg {...base(size)}><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="6" r="2.5" /><path d="M8 16L16 8" /></svg>);
+export const Shapes = ({ size }: P) => (<svg {...base(size)}><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><circle cx="17" cy="7" r="3.5" /><path d="M7 14l3.5 6.5h-7z" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" /></svg>);
+export const Undo = ({ size }: P) => (<svg {...base(size)}><path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg>);
+export const Redo = ({ size }: P) => (<svg {...base(size)}><path d="M15 14l5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /></svg>);
+export const Trash = ({ size }: P) => (<svg {...base(size)}><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg>);
+export const Swap = ({ size }: P) => (<svg {...base(size)}><path d="M4 8h14l-3-3M20 16H6l3 3" /></svg>);
+export const Code = ({ size }: P) => (<svg {...base(size)}><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" /></svg>);
