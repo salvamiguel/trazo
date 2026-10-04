@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { loadCalm, validateCalm } from '../src/model/calm.ts';
 import { projectView } from '../src/model/view.ts';
 import { loadWorkspace } from '../src/workspace.ts';
-import { computePartitions } from '../src/layout/presets.ts';
+import { presetRules } from '../src/layout/presets.ts';
 
 const EXAMPLE = join(import.meta.dirname, '../../../examples/aws-pagos');
 
@@ -75,11 +75,13 @@ describe('views', () => {
 
   it('aws-infra preset puts tiers in order: edge, public, private, regional', () => {
     const graph = projectView(ws.model, view('infra-aws'));
-    const p = computePartitions('aws-infra', graph, ws.model)!;
-    expect(p.get('cloudfront')).toBe(0);
-    expect(p.get('alb')).toBe(1);
-    expect(p.get('payments-api')).toBe(2);
-    expect(p.get('cola-pagos')).toBe(3);
+    const { partitions, overlays } = presetRules('aws-infra', graph, ws.model);
+    expect(partitions?.get('cloudfront')).toBe(0);
+    expect(partitions?.get('public-a')).toBe(1);
+    expect(partitions?.get('private-b')).toBe(2);
+    expect(partitions?.get('cola-pagos')).toBe(3);
+    expect(partitions?.get('vpc')).toBe(1);
+    expect([...overlays].sort()).toEqual(['az-a', 'az-b']);
   });
 });
 

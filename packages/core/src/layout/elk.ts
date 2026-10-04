@@ -5,7 +5,7 @@ import type { Direction, Element } from '../model/types.ts';
 import { FONT, textWidth, wrap } from './text.ts';
 import type { Layout, LabelLine, PlacedEdge, PlacedLabel, PlacedNode, Point } from './types.ts';
 import { simplifyPolyline } from './polyline.ts';
-import { computePartitions } from './presets.ts';
+import { presetRules } from './presets.ts';
 import type { Model } from '../model/types.ts';
 
 // elkjs ships CommonJS; load it explicitly so ESM and the typings agree.
@@ -14,6 +14,7 @@ const ELK = createRequire(import.meta.url)('elkjs/lib/elk.bundled.js') as new (a
 export const ICON_SIZE = 56;
 const LABEL_MAX_WIDTH = 150;
 const GROUP_PADDING = { top: 40, left: 20, bottom: 20, right: 20 };
+const OVERLAY_PADDING = { top: 34, side: 14 };
 
 const ELK_DIRECTION: Record<Direction, string> = { right: 'RIGHT', down: 'DOWN', left: 'LEFT', up: 'UP' };
 const SIDES: Record<Direction, { out: string; in: string }> = {
@@ -131,18 +132,57 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     },
   };
 
-  const partitions = options.model ? computePartitions(options.preset, graph, options.model) : undefined;
-  if (partitions) {
-    root.layoutOptions!['elk.partitioning.activate'] = 'true';
-    for (const [id, partition] of partitions) {
+  const rules = options.model ? presetRules(options.preset, graph, options.model) : { overlays: new Set<string>() };
+  // Overlay groups are skipped by ELK: their children attach to the closest non-overlay ancestor.
+  const elkParent = (id: string): string | undefined => {
+    let p = graph.parent.get(id);
+    while (p && rules.overlays.has(p)) p = graph.parent.get(p);
+    return p;
+  };
+
+  for (const e of graph.elements) {
+    if (rules.overlays.has(e.id)) continue;
+    const parentId = elkParent(e.id);
+    const container = parentId ? elkNodes.get(parentId)! : root;
+    container.children!.push(elkNodes.get(e.id)!);
+  }
+
+  if (rules.partitions) {
+    // Partitioning is a per-graph option in ELK: enable it on every level.
+    for (const container of [root, ...[...elkNodes.values()].filter((n) => n.children)]) {
+      container.layoutOptions!['elk.partitioning.activate'] = 'true';
+    }
+    for (const [id, partition] of rules.partitions) {
       elkNodes.get(id)!.layoutOptions!['elk.partitioning.partition'] = String(partition);
     }
   }
+  for (const id of rules.overlays) {
+    // Leave room for the overlay frame and its title around the lifted children.
+    const host = elkParent(id);
+    const hostNode = host ? elkNodes.get(host)! : root;
+    hostNode.layoutOptions!['elk.spacing.nodeNode'] = String(OVERLAY_PADDING.side * 2 + 24);
+    hostNode.layoutOptions!['elk.padding'] =
+      `[top=${GROUP_PADDING.top + OVERLAY_PADDING.top},left=${GROUP_PADDING.left + OVERLAY_PADDING.side},bottom=${GROUP_PADDING.bottom + OVERLAY_PADDING.side},right=${GROUP_PADDING.right + OVERLAY_PADDING.side}]`;
+  }
 
-  for (const e of graph.elements) {
-    const parentId = graph.parent.get(e.id);
-    const container = parentId ? elkNodes.get(parentId)! : root;
-    container.children!.push(elkNodes.get(e.id)!);
+  // With nested graphs ELK does not enforce partitions against edges that point backwards
+  // (e.g. private subnet → NAT in the public subnet). Such edges are given to ELK reversed
+  // and flipped back afterwards, which keeps the tier columns intact.
+  const reversed = new Set<string>();
+  // Edges between the same tier of different overlays (e.g. Aurora writer in AZ A → reader in
+  // AZ B) would push one AZ after the other; ELK ignores them and they are routed afterwards.
+  const manual = new Set<string>();
+  const overlayOf = (id: string) => {
+    for (let p = graph.parent.get(id); p; p = graph.parent.get(p)) if (rules.overlays.has(p)) return p;
+    return undefined;
+  };
+  if (rules.partitions) {
+    for (const r of graph.relationships) {
+      const [a, b] = siblingAncestors(r.source, r.target, elkParent);
+      const pa = rules.partitions.get(a) ?? 0, pb = rules.partitions.get(b) ?? 0;
+      if (pa > pb) reversed.add(r.id);
+      else if (pa === pb && a !== b && overlayOf(r.source) && overlayOf(r.target) && overlayOf(r.source) !== overlayOf(r.target)) manual.add(r.id);
+    }
   }
 
   const edgeLines = new Map<string, LabelLine[]>();
@@ -150,8 +190,10 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     const text = [r.description, r.protocol].filter(Boolean).join(' · ');
     const lines = text ? edgeLabelLines(text) : [];
     edgeLines.set(r.id, lines);
-    const sources = [portFor(elkNodes.get(r.source)!, `${r.id}__out`, sides.out, graph.groups.has(r.source))];
-    const targets = [portFor(elkNodes.get(r.target)!, `${r.id}__in`, sides.in, graph.groups.has(r.target))];
+    if (manual.has(r.id)) continue;
+    const [from, to] = reversed.has(r.id) ? [r.target, r.source] : [r.source, r.target];
+    const sources = [portFor(elkNodes.get(from)!, `${r.id}__out`, sides.out, graph.groups.has(from))];
+    const targets = [portFor(elkNodes.get(to)!, `${r.id}__in`, sides.in, graph.groups.has(to))];
     const edge: ElkExtendedEdge = {
       id: r.id,
       sources,
@@ -161,7 +203,19 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     root.edges!.push(edge);
   }
 
-  const result = await elk.layout(root);
+  // Overlay frames are drawn after layout; if two of them collide, widen the spacing of
+  // their host graph and lay out again (a few passes at most).
+  let result = await elk.layout(structuredClone(root));
+  for (let pass = 0; pass < 3 && rules.overlays.size; pass++) {
+    const overlap = overlayOverlap(result, rules.overlays, graph);
+    if (overlap.size === 0) break;
+    for (const [host, amount] of overlap) {
+      const hostNode = host ? elkNodes.get(host)! : root;
+      const current = Number(hostNode.layoutOptions!['elk.spacing.nodeNode'] ?? 44);
+      hostNode.layoutOptions!['elk.spacing.nodeNode'] = String(Math.ceil(current + amount + 8));
+    }
+    result = await elk.layout(structuredClone(root));
+  }
 
   const nodes: PlacedNode[] = [];
   const visit = (n: ElkNode, depth: number, parent?: string) => {
@@ -189,6 +243,7 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     }
   };
   visit(result, 0);
+  placeOverlays(nodes, rules.overlays, graph, labelLines);
 
   const edges: PlacedEdge[] = [];
   const collectEdges = (n: ElkNode) => {
@@ -196,6 +251,7 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
       const section = e.sections?.[0];
       if (!section) continue;
       const points: Point[] = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({ x: p.x, y: p.y }));
+      if (reversed.has(e.id)) points.reverse();
       const rel = graph.relationships.find((r) => r.id === e.id)!;
       const lbl = e.labels?.[0];
       const lines = edgeLines.get(e.id) ?? [];
@@ -206,6 +262,11 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     for (const child of n.children ?? []) collectEdges(child);
   };
   collectEdges(result);
+  for (const r of graph.relationships) {
+    if (!manual.has(r.id)) continue;
+    const lines = edgeLines.get(r.id) ?? [];
+    edges.push(routeBetweenRows(r.id, r.source, r.target, nodes, lines));
+  }
 
   return { width: result.width ?? 0, height: result.height ?? 0, nodes, edges };
 }
@@ -215,4 +276,102 @@ function portFor(node: ElkNode, id: string, side: string, isGroup: boolean): str
   if (isGroup) return node.id;
   node.ports!.push({ id, width: 1, height: 1, layoutOptions: { 'elk.port.side': side } });
   return id;
+}
+
+/** Frames overlay groups around their (already placed) descendants and fixes parent/depth links. */
+function placeOverlays(nodes: PlacedNode[], overlays: Set<string>, graph: ViewGraph, labelLines: Map<string, LabelLine[]>) {
+  if (overlays.size === 0) return;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const descendants = (id: string) => nodes.filter((n) => {
+    for (let p = graph.parent.get(n.id); p; p = graph.parent.get(p)) if (p === id) return true;
+    return false;
+  });
+  // Innermost overlays first, so nested overlays are framed before their parents.
+  const depthOf = (id: string) => { let d = 0; for (let p = graph.parent.get(id); p; p = graph.parent.get(p)) d++; return d; };
+  for (const id of [...overlays].sort((a, b) => depthOf(b) - depthOf(a))) {
+    const inner = descendants(id);
+    if (inner.length === 0) continue;
+    const x1 = Math.min(...inner.map((n) => n.x)) - OVERLAY_PADDING.side;
+    const y1 = Math.min(...inner.map((n) => n.y)) - OVERLAY_PADDING.top;
+    const x2 = Math.max(...inner.map((n) => Math.max(n.x + n.width, n.label.x + n.label.width))) + OVERLAY_PADDING.side;
+    const y2 = Math.max(...inner.map((n) => Math.max(n.y + n.height, n.label.y + n.label.height))) + OVERLAY_PADDING.side;
+    const lines = labelLines.get(id) ?? [];
+    const size = measure(lines);
+    const host = graph.parent.get(id);
+    const overlay: PlacedNode = {
+      id, x: x1, y: y1, width: x2 - x1, height: y2 - y1, isGroup: true, depth: 0, parent: host,
+      label: { x: x1, y: y1, width: size.width, height: size.height, lines },
+    };
+    nodes.push(overlay);
+    byId.set(id, overlay);
+  }
+  // Recompute parents (logical hierarchy) and depths now that overlays exist.
+  for (const n of nodes) n.parent = graph.parent.get(n.id);
+  const depth = (n: PlacedNode): number => (n.parent && byId.get(n.parent) ? depth(byId.get(n.parent)!) + 1 : 0);
+  for (const n of nodes) n.depth = depth(n);
+}
+
+/** The two distinct ancestors (or selves) of a and b that share the same parent in the ELK tree. */
+function siblingAncestors(a: string, b: string, parentOf: (id: string) => string | undefined): [string, string] {
+  const chain = (id: string) => {
+    const out = [id];
+    for (let p = parentOf(id); p; p = parentOf(p)) out.push(p);
+    return out;
+  };
+  const ca = chain(a), cb = chain(b);
+  const setB = new Set(cb);
+  const common = ca.find((x) => setB.has(x));
+  const below = (c: string[]) => (common ? c[c.indexOf(common) - 1] ?? c[0]! : c[c.length - 1]!);
+  return [below(ca), below(cb)];
+}
+
+/**
+ * Routes an edge ELK skipped between two nodes in different rows of the same column
+ * (e.g. Aurora writer in AZ A → reader in AZ B): a "C" around their east sides, so the
+ * line never crosses the labels drawn under the icons.
+ */
+function routeBetweenRows(id: string, source: string, target: string, nodes: PlacedNode[], lines: LabelLine[]): PlacedEdge {
+  const s = nodes.find((n) => n.id === source)!, t = nodes.find((n) => n.id === target)!;
+  const sy = s.y + s.height / 2, ty = t.y + t.height / 2;
+  const x = Math.max(s.x + s.width, t.x + t.width) + 18;
+  const points: Point[] = [{ x: s.x + s.width, y: sy }, { x, y: sy }, { x, y: ty }, { x: t.x + t.width, y: ty }];
+  let label: PlacedLabel | undefined;
+  if (lines.length) {
+    const size = measure(lines);
+    label = { x: x + 6, y: (sy + ty) / 2 - size.height / 2, ...size, lines };
+  }
+  return { id, source, target, points: simplifyPolyline(points), label };
+}
+
+/** Vertical/horizontal overlap between sibling overlay frames, per host group, after a layout pass. */
+function overlayOverlap(result: ElkNode, overlays: Set<string>, graph: ViewGraph): Map<string | undefined, number> {
+  const boxes = new Map<string, { x1: number; y1: number; x2: number; y2: number }>();
+  const visit = (n: ElkNode) => {
+    for (const c of n.children ?? []) {
+      for (let p = graph.parent.get(c.id); p; p = graph.parent.get(p)) {
+        if (!overlays.has(p)) continue;
+        const lbl = c.labels?.[0];
+        const b = boxes.get(p) ?? { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+        b.x1 = Math.min(b.x1, (c.x ?? 0) - OVERLAY_PADDING.side);
+        b.y1 = Math.min(b.y1, (c.y ?? 0) - OVERLAY_PADDING.top);
+        b.x2 = Math.max(b.x2, (c.x ?? 0) + (c.width ?? 0) + OVERLAY_PADDING.side, lbl ? (lbl.x ?? 0) + (lbl.width ?? 0) : -Infinity);
+        b.y2 = Math.max(b.y2, (c.y ?? 0) + (c.height ?? 0) + OVERLAY_PADDING.side, lbl ? (lbl.y ?? 0) + (lbl.height ?? 0) + OVERLAY_PADDING.side : -Infinity);
+        boxes.set(p, b);
+      }
+      visit(c);
+    }
+  };
+  visit(result);
+  const out = new Map<string | undefined, number>();
+  const ids = [...boxes.keys()];
+  for (let i = 0; i < ids.length; i++)
+    for (let j = i + 1; j < ids.length; j++) {
+      const a = boxes.get(ids[i]!)!, b = boxes.get(ids[j]!)!;
+      const ox = Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1);
+      const oy = Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1);
+      if (ox <= 0 || oy <= 0) continue;
+      const host = graph.parent.get(ids[i]!);
+      out.set(host, Math.max(out.get(host) ?? 0, Math.min(ox, oy)));
+    }
+  return out;
 }

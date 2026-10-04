@@ -1,32 +1,41 @@
 import type { Model } from '../model/types.ts';
 import type { ViewGraph } from '../model/view.ts';
 
-/**
- * Preset layout rules expressed as ELK partitions: nodes in partition k always sit in layers
- * after partition k-1. For AWS infrastructure this produces the conventional tier columns
- * (edge → public subnets → private subnets → regional/external services) and stacks the
- * availability zones instead of placing them one after another.
- */
-export function computePartitions(preset: string | undefined, graph: ViewGraph, model: Model): Map<string, number> | undefined {
+export interface PresetRules {
+  /**
+   * ELK partition per node (leaf or group), compared among siblings: a node in partition k
+   * always sits after siblings in partition k-1 along the flow direction.
+   */
+  partitions?: Map<string, number>;
+  /**
+   * Groups that ELK does not see: their children are laid out by the grandparent and the
+   * group is drawn afterwards around them. Used for cross-cutting groupings such as AWS
+   * availability zones, which are rows across the subnet-tier columns.
+   */
+  overlays: Set<string>;
+}
+
+export function presetRules(preset: string | undefined, graph: ViewGraph, model: Model): PresetRules {
   const explicit = new Map<string, number>();
   for (const e of graph.elements) {
     const tier = model.elements.get(e.id)?.tier;
     if (tier !== undefined) explicit.set(e.id, tier);
   }
-  if (preset !== 'aws-infra') return explicit.size ? fillMissing(explicit, graph) : undefined;
+  if (preset !== 'aws-infra') {
+    return { partitions: explicit.size ? propagate(explicit, graph) : undefined, overlays: new Set() };
+  }
 
+  const style = (id: string) => model.elements.get(id)?.groupStyle;
   const subnetTier = (id: string): number | undefined => {
     for (let cur: string | undefined = id; cur; cur = graph.parent.get(cur)) {
-      const style = model.elements.get(cur)?.groupStyle;
-      if (style === 'aws-subnet-public') return 1;
-      if (style === 'aws-subnet-private') return 2;
+      if (style(cur) === 'aws-subnet-public') return 1;
+      if (style(cur) === 'aws-subnet-private') return 2;
     }
     return undefined;
   };
 
   const leaves = graph.elements.filter((e) => !graph.groups.has(e.id));
   const inSubnet = new Set(leaves.filter((e) => subnetTier(e.id) !== undefined).map((e) => e.id));
-  // Outside the subnets: upstream if it can reach a subnet node, downstream otherwise.
   const adjacency = new Map<string, string[]>();
   for (const r of graph.relationships) adjacency.set(r.source, [...(adjacency.get(r.source) ?? []), r.target]);
   const reachesSubnet = (start: string) => {
@@ -41,14 +50,24 @@ export function computePartitions(preset: string | undefined, graph: ViewGraph, 
     return false;
   };
 
-  const partitions = new Map<string, number>();
-  for (const e of leaves) {
-    partitions.set(e.id, explicit.get(e.id) ?? subnetTier(e.id) ?? (reachesSubnet(e.id) ? 0 : 3));
-  }
-  return partitions;
+  // Tiers: edge services → public subnets → private subnets → regional/external services.
+  const leafTiers = new Map<string, number>();
+  for (const e of leaves) leafTiers.set(e.id, explicit.get(e.id) ?? subnetTier(e.id) ?? (reachesSubnet(e.id) ? 0 : 3));
+
+  // Availability zones are rows across the subnet-tier columns, not boxes in the flow.
+  const overlays = new Set(graph.elements.filter((e) => style(e.id) === 'aws-az' && graph.groups.has(e.id)).map((e) => e.id));
+  return { partitions: propagate(leafTiers, graph), overlays };
 }
 
-function fillMissing(partitions: Map<string, number>, graph: ViewGraph) {
-  for (const e of graph.elements) if (!graph.groups.has(e.id) && !partitions.has(e.id)) partitions.set(e.id, 0);
-  return partitions;
+/** Gives every group the lowest partition among its descendants, so siblings compare correctly. */
+function propagate(leafPartitions: Map<string, number>, graph: ViewGraph): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const e of graph.elements) {
+    if (graph.groups.has(e.id)) continue;
+    const p = leafPartitions.get(e.id) ?? 0;
+    for (let cur: string | undefined = e.id; cur; cur = graph.parent.get(cur)) {
+      result.set(cur, Math.min(result.get(cur) ?? Infinity, p));
+    }
+  }
+  return result;
 }

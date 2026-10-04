@@ -6,6 +6,8 @@ Diagramas de arquitectura que se dibujan solos. Escribes **qué** hay (un modelo
 
 ![Vista C4 de contenedores generada por Trazo](docs/img/contenedores-c4.light.svg)
 
+![Vista de infraestructura AWS: AZ en filas y subredes en columnas](docs/img/infra-aws.light.svg)
+
 ## Probarlo
 
 ```bash
