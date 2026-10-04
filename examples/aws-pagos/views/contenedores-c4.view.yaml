@@ -1,0 +1,6 @@
+title: Contenedores (C4)
+preset: c4-container
+hierarchy: composition
+include: [clientes, cloudfront, payments-api, orders-api, aurora-writer, cola-pagos, notificador, recibos, pasarela, bedrock]
+layout:
+  direction: right

@@ -1,0 +1,285 @@
+# Plataforma de pagos en AWS: ejemplo de workspace Trazo.
+# El fichero es CALM 1.2 válido; lo específico de Trazo vive en metadata.trazo.
+$schema: https://calm.finos.org/release/1.2/meta/calm.json
+
+nodes:
+  # --- Actores y sistemas externos ---
+  - unique-id: clientes
+    node-type: actor
+    name: Clientes
+    description: Usuarios de la app web y móvil
+  - unique-id: pasarela
+    node-type: system
+    name: Pasarela de pago
+    description: Proveedor externo que autoriza los cargos
+  - unique-id: bedrock
+    node-type: service
+    name: Amazon Bedrock
+    description: Modelo de IA para scoring de fraude
+    metadata:
+      trazo: { technology: Claude, icon: ai/anthropic }
+
+  # --- Contenedores de despliegue (AWS) ---
+  - unique-id: aws
+    node-type: ecosystem
+    name: AWS Cloud
+    description: Cuenta de producción
+    metadata:
+      trazo: { group-style: aws-cloud }
+  - unique-id: eu-west-1
+    node-type: ecosystem
+    name: Región eu-west-1
+    description: Región principal
+    metadata:
+      trazo: { group-style: aws-region }
+  - unique-id: vpc
+    node-type: network
+    name: VPC producción
+    description: 10.0.0.0/16
+    metadata:
+      trazo: { group-style: aws-vpc }
+  - unique-id: az-a
+    node-type: network
+    name: Zona de disponibilidad A
+    description: eu-west-1a
+    metadata:
+      trazo: { group-style: aws-az }
+  - unique-id: az-b
+    node-type: network
+    name: Zona de disponibilidad B
+    description: eu-west-1b
+    metadata:
+      trazo: { group-style: aws-az }
+  - unique-id: public-a
+    node-type: network
+    name: Subred pública A
+    description: 10.0.0.0/24
+    metadata:
+      trazo: { group-style: aws-subnet-public }
+  - unique-id: private-a
+    node-type: network
+    name: Subred privada A
+    description: 10.0.10.0/24
+    metadata:
+      trazo: { group-style: aws-subnet-private }
+  - unique-id: public-b
+    node-type: network
+    name: Subred pública B
+    description: 10.0.1.0/24
+    metadata:
+      trazo: { group-style: aws-subnet-public }
+  - unique-id: private-b
+    node-type: network
+    name: Subred privada B
+    description: 10.0.11.0/24
+    metadata:
+      trazo: { group-style: aws-subnet-private }
+
+  - unique-id: sg-payments
+    node-type: network
+    name: SG payments
+    description: Solo HTTPS desde el ALB
+    metadata:
+      trazo: { group-style: aws-security-group }
+
+  # --- Sistema lógico (C4) ---
+  - unique-id: plataforma-pagos
+    node-type: system
+    name: Plataforma de pagos
+    description: Sistema que procesa pagos y pedidos
+    metadata:
+      trazo: { c4: system, group-style: system }
+
+  # --- Servicios ---
+  - unique-id: route53
+    node-type: service
+    name: Route 53
+    description: DNS público
+    metadata:
+      trazo: { technology: DNS, icon: aws/route53 }
+  - unique-id: cloudfront
+    node-type: service
+    name: CloudFront
+    description: CDN y terminación TLS
+    metadata:
+      trazo: { technology: CDN, icon: aws/cloudfront }
+  - unique-id: waf
+    node-type: service
+    name: AWS WAF
+    description: Reglas de protección L7
+    metadata:
+      trazo: { icon: aws/waf }
+  - unique-id: alb
+    node-type: service
+    name: Application Load Balancer
+    description: Balanceo hacia EKS
+    metadata:
+      trazo: { technology: ALB, icon: aws/elb }
+  - unique-id: nat-b
+    node-type: service
+    name: NAT Gateway
+    description: Salida a Internet
+    metadata:
+      trazo: { icon: aws/vpc }
+  - unique-id: payments-api
+    node-type: service
+    name: Payments API
+    description: Autoriza y registra pagos
+    metadata:
+      trazo: { technology: Spring Boot on EKS, icon: aws/eks, c4: container }
+  - unique-id: orders-api
+    node-type: service
+    name: Orders API
+    description: Gestiona pedidos
+    metadata:
+      trazo: { technology: Node.js on EKS, icon: aws/eks, c4: container }
+  - unique-id: aurora-writer
+    node-type: database
+    name: Aurora (escritura)
+    description: Base de datos principal
+    metadata:
+      trazo: { technology: Aurora PostgreSQL, icon: aws/aurora, c4: container }
+  - unique-id: aurora-reader
+    node-type: database
+    name: Aurora (lectura)
+    description: Réplica de lectura
+    metadata:
+      trazo: { technology: Aurora PostgreSQL, icon: aws/aurora }
+  - unique-id: cola-pagos
+    node-type: service
+    name: Cola de pagos
+    description: Eventos de pago confirmados
+    metadata:
+      trazo: { technology: SQS, icon: aws/sqs, c4: container }
+  - unique-id: notificador
+    node-type: service
+    name: Notificador
+    description: Envía recibos
+    metadata:
+      trazo: { technology: Lambda, icon: aws/lambda, c4: container }
+  - unique-id: recibos
+    node-type: data-asset
+    name: Recibos
+    description: PDFs de recibos
+    metadata:
+      trazo: { technology: S3, icon: aws/s3, c4: container }
+  - unique-id: secretos
+    node-type: service
+    name: Secrets Manager
+    description: Credenciales de BD y pasarela
+    metadata:
+      trazo: { icon: aws/secrets-manager }
+
+relationships:
+  # --- Despliegue: dónde corre cada cosa ---
+  - unique-id: d-aws
+    relationship-type:
+      deployed-in: { container: aws, nodes: [eu-west-1, route53, cloudfront, waf] }
+  - unique-id: d-region
+    relationship-type:
+      deployed-in: { container: eu-west-1, nodes: [vpc, cola-pagos, notificador, recibos, secretos] }
+  - unique-id: d-vpc
+    relationship-type:
+      deployed-in: { container: vpc, nodes: [az-a, az-b] }
+  - unique-id: d-az-a
+    relationship-type:
+      deployed-in: { container: az-a, nodes: [public-a, private-a] }
+  - unique-id: d-az-b
+    relationship-type:
+      deployed-in: { container: az-b, nodes: [public-b, private-b] }
+  - unique-id: d-public-a
+    relationship-type:
+      deployed-in: { container: public-a, nodes: [alb] }
+  - unique-id: d-private-a
+    relationship-type:
+      deployed-in: { container: private-a, nodes: [sg-payments, aurora-writer] }
+  - unique-id: d-sg-payments
+    relationship-type:
+      deployed-in: { container: sg-payments, nodes: [payments-api] }
+  - unique-id: d-public-b
+    relationship-type:
+      deployed-in: { container: public-b, nodes: [nat-b] }
+  - unique-id: d-private-b
+    relationship-type:
+      deployed-in: { container: private-b, nodes: [orders-api, aurora-reader] }
+
+  # --- Composición lógica (C4) ---
+  - unique-id: c-plataforma
+    relationship-type:
+      composed-of:
+        container: plataforma-pagos
+        nodes: [payments-api, orders-api, aurora-writer, cola-pagos, notificador, recibos]
+
+  # --- Interacciones ---
+  - unique-id: r-dns
+    description: Resuelve dominio
+    relationship-type:
+      interacts: { actor: clientes, nodes: [route53] }
+  - unique-id: r-web
+    description: Usa la app
+    protocol: HTTPS
+    relationship-type:
+      interacts: { actor: clientes, nodes: [cloudfront] }
+  - unique-id: r-waf
+    description: Filtra peticiones
+    relationship-type:
+      connects: { source: { node: waf }, destination: { node: cloudfront } }
+  - unique-id: r-origin
+    description: Origen
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: cloudfront }, destination: { node: alb } }
+  - unique-id: r-alb-pay
+    description: /payments
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: alb }, destination: { node: payments-api } }
+  - unique-id: r-alb-ord
+    description: /orders
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: alb }, destination: { node: orders-api } }
+  - unique-id: r-pay-db
+    description: Lee y escribe pagos
+    protocol: JDBC
+    relationship-type:
+      connects: { source: { node: payments-api }, destination: { node: aurora-writer } }
+  - unique-id: r-ord-db
+    description: Consulta pedidos
+    protocol: JDBC
+    relationship-type:
+      connects: { source: { node: orders-api }, destination: { node: aurora-reader } }
+  - unique-id: r-repl
+    description: Replicación
+    relationship-type:
+      connects: { source: { node: aurora-writer }, destination: { node: aurora-reader } }
+  - unique-id: r-pay-queue
+    description: Publica pago confirmado
+    relationship-type:
+      connects: { source: { node: payments-api }, destination: { node: cola-pagos } }
+  - unique-id: r-queue-lambda
+    description: Dispara
+    relationship-type:
+      connects: { source: { node: cola-pagos }, destination: { node: notificador } }
+  - unique-id: r-lambda-s3
+    description: Guarda recibo
+    relationship-type:
+      connects: { source: { node: notificador }, destination: { node: recibos } }
+  - unique-id: r-pay-secrets
+    description: Lee credenciales
+    relationship-type:
+      connects: { source: { node: payments-api }, destination: { node: secretos } }
+  - unique-id: r-pay-gw
+    description: Autoriza cargo
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: payments-api }, destination: { node: pasarela } }
+  - unique-id: r-pay-ai
+    description: Scoring de fraude
+    protocol: HTTPS
+    relationship-type:
+      connects: { source: { node: payments-api }, destination: { node: bedrock } }
+  - unique-id: r-ord-nat
+    description: Salida a Internet
+    relationship-type:
+      connects: { source: { node: orders-api }, destination: { node: nat-b } }
