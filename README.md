@@ -40,6 +40,23 @@ examples/aws-pagos/
 - **CALM estándar.** Lo específico de Trazo (icono, tecnología, nivel C4, estilo de grupo, tier) va en `metadata.trazo`, así que el fichero valida contra el meta-esquema oficial de CALM 1.2 (incluido en `packages/core/schemas`).
 - **Git-friendly.** Las coordenadas no se guardan en el modelo: el layout es determinista y se recalcula.
 
+## Grupos
+
+Un nodo CALM que contiene a otros (`deployed-in` o `composed-of`) se dibuja como grupo. Su aspecto se elige con `metadata.trazo.group-style`; los estilos AWS llevan icono en la cabecera, como en draw.io:
+
+| `group-style` | Icono |
+|---|---|
+| `aws-cloud` | AWS |
+| `aws-account` | Cuenta |
+| `aws-region` | Bandera |
+| `aws-vpc` | Nube con candado |
+| `aws-subnet-public` / `aws-subnet-private` | Candado abierto / cerrado |
+| `aws-security-group` | Escudo |
+| `k8s-cluster` | Kubernetes |
+| `aws-az`, `k8s-namespace`, `system`, `generic` | Sin icono |
+
+`metadata.trazo.icon` en el grupo sustituye el icono por defecto. Al exportar a `.drawio`, los grupos AWS usan las formas nativas de draw.io (`mxgraph.aws4.group`) y el resto lleva el icono como imagen bloqueada en la esquina.
+
 ## Estructura
 
 | Ruta | Qué hace |

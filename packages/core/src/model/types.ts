@@ -8,6 +8,7 @@ export type GroupStyle =
   | 'aws-az'
   | 'aws-subnet-public'
   | 'aws-subnet-private'
+  | 'aws-security-group'
   | 'k8s-cluster'
   | 'k8s-namespace'
   | 'system'

@@ -1,7 +1,22 @@
 import type { Model } from '../model/types.ts';
 import type { Layout, PlacedNode, Point } from '../layout/types.ts';
 import { getIcon, iconFor } from '../icons/registry.ts';
+import { GROUP_BADGE, groupBadgeSvg } from '../icons/groups.ts';
+import type { GroupStyle } from '../model/types.ts';
 import { THEMES } from '../render/theme.ts';
+
+/**
+ * draw.io's own AWS group shapes (Arrange > AWS 2021 "Groups"), so exported groups stay
+ * native and editable. Styles without a native icon get an image badge cell instead.
+ */
+const NATIVE_AWS_GROUPS: Partial<Record<GroupStyle, Record<string, string | number>>> = {
+  'aws-cloud': { grIcon: 'mxgraph.aws4.group_aws_cloud_alt' },
+  'aws-account': { grIcon: 'mxgraph.aws4.group_account' },
+  'aws-region': { grIcon: 'mxgraph.aws4.group_region' },
+  'aws-vpc': { grIcon: 'mxgraph.aws4.group_vpc2' },
+  'aws-subnet-public': { grIcon: 'mxgraph.aws4.group_security_group', grStroke: 0 },
+  'aws-subnet-private': { grIcon: 'mxgraph.aws4.group_security_group', grStroke: 0 },
+};
 
 const xmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const htmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -46,13 +61,18 @@ export function exportDrawio(layout: Layout, model: Model, name = 'Trazo'): stri
     const parentCell = parent ? cellId(parent.id) : '1';
     let value: string;
     let st: string;
+    let badge: string | null = null;
     if (n.isGroup) {
       const g = theme.groups[el.groupStyle ?? 'generic'];
+      const native = !el.icon && el.groupStyle ? NATIVE_AWS_GROUPS[el.groupStyle] : undefined;
+      badge = native ? null : groupBadgeSvg(el, g.stroke);
+      const hasIcon = Boolean(native || badge);
       value = htmlEsc(el.name);
       st = style({
-        rounded: 1, arcSize: 2, absoluteArcSize: 1, whiteSpace: 'wrap', html: 1, container: 1, collapsible: 0, recursiveResize: 0,
+        ...(native ? { shape: 'mxgraph.aws4.group', grIconSize: 22, ...native } : { rounded: 1, arcSize: 2, absoluteArcSize: 1 }),
+        whiteSpace: 'wrap', html: 1, container: 1, collapsible: 0, recursiveResize: 0, pointerEvents: 0,
         fillColor: g.fill === 'none' ? 'none' : g.fill, strokeColor: g.stroke, fontColor: g.text, dashed: g.dashed ? 1 : 0,
-        verticalAlign: 'top', align: 'left', spacingLeft: 10, spacingTop: 4, fontStyle: 1, fontSize: 12,
+        verticalAlign: 'top', align: 'left', spacingLeft: hasIcon ? 34 : 10, spacingTop: 4, fontStyle: 1, fontSize: 12,
       });
     } else {
       const icon = getIcon(iconFor(el.icon, el.nodeType));
@@ -65,6 +85,14 @@ export function exportDrawio(layout: Layout, model: Model, name = 'Trazo'): stri
       `<mxCell id="${xmlEsc(cellId(n.id))}" value="${xmlEsc(value)}" style="${xmlEsc(st)}" vertex="1" parent="${xmlEsc(parentCell)}">` +
         `<mxGeometry x="${r(x)}" y="${r(y)}" width="${r(n.width)}" height="${r(n.height)}" as="geometry"/></mxCell>`,
     );
+    if (badge) {
+      // Badge as a locked child image in the group's top-left corner.
+      const bst = style({ shape: 'image', image: imageDataUri(badge), imageAspect: 1, aspect: 'fixed', movable: 0, resizable: 0, rotatable: 0, deletable: 0, editable: 0, connectable: 0 });
+      cells.push(
+        `<mxCell id="${xmlEsc(cellId(n.id))}-badge" value="" style="${xmlEsc(bst)}" vertex="1" parent="${xmlEsc(cellId(n.id))}">` +
+          `<mxGeometry x="${GROUP_BADGE.inset}" y="${GROUP_BADGE.inset}" width="${GROUP_BADGE.size}" height="${GROUP_BADGE.size}" as="geometry"/></mxCell>`,
+      );
+    }
   }
 
   for (const e of layout.edges) {

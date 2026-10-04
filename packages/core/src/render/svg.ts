@@ -2,6 +2,7 @@ import type { Model } from '../model/types.ts';
 import type { Layout, PlacedLabel, PlacedNode, Point } from '../layout/types.ts';
 import { FONT } from '../layout/text.ts';
 import { getIcon, iconFor } from '../icons/registry.ts';
+import { GROUP_BADGE, groupBadgeSpace, groupBadgeSvg } from '../icons/groups.ts';
 import { THEMES, type Theme, type ThemeName } from './theme.ts';
 
 export interface SvgOptions {
@@ -72,9 +73,14 @@ export function renderSvg(layout: Layout, model: Model, options: SvgOptions = {}
   for (const g of groups) {
     const el = model.elements.get(g.id)!;
     const tokens = theme.groups[el.groupStyle ?? 'generic'];
+    const badge = groupBadgeSvg(el, tokens.stroke);
+    const badgeMarkup = badge
+      ? badge.replace('<svg ', `<svg x="${r(g.x + GROUP_BADGE.inset)}" y="${r(g.y + GROUP_BADGE.inset)}" `)
+      : '';
     out.push(
       `<g data-id="${esc(g.id)}"><rect x="${r(g.x)}" y="${r(g.y)}" width="${r(g.width)}" height="${r(g.height)}" rx="6" fill="${tokens.fill}" stroke="${tokens.stroke}" stroke-width="1.5"${tokens.dashed ? ' stroke-dasharray="6 4"' : ''}/>`,
-      labelText({ ...g.label, x: g.x + 12, y: g.y + 8 }, theme, 'start', tokens.text),
+      badgeMarkup,
+      labelText({ ...g.label, x: g.x + 12 + groupBadgeSpace(el) - (badge ? 8 : 0), y: g.y + 8 }, theme, 'start', tokens.text),
       '</g>',
     );
   }

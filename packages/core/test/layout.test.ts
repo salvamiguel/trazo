@@ -56,7 +56,14 @@ describe.each(ws.views.map((v) => [v.id, v] as const))('view %s', (_id, view) =>
       }
     });
     expect(cells.filter((c) => c.edge).length).toBe(layout.edges.length);
-    expect(cells.filter((c) => c.vertex).length).toBe(layout.nodes.length);
+    const badges = cells.filter((c) => c.id?.endsWith('-badge'));
+    expect(cells.filter((c) => c.vertex).length).toBe(layout.nodes.length + badges.length);
+    // AWS groups use draw.io's native group shapes; the rest carry an image badge.
+    if (view.id === 'infra-aws') {
+      const vpc = cells.find((c) => c.id === 't-vpc')!;
+      expect(vpc.style).toContain('grIcon=mxgraph.aws4.group_vpc2');
+      expect(badges.map((b) => b.parent)).toContain('t-sg-payments');
+    }
   });
 });
 

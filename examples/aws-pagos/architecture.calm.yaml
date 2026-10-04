@@ -75,6 +75,13 @@ nodes:
     metadata:
       trazo: { group-style: aws-subnet-private }
 
+  - unique-id: sg-payments
+    node-type: network
+    name: SG payments
+    description: Solo HTTPS desde el ALB
+    metadata:
+      trazo: { group-style: aws-security-group }
+
   # --- Sistema lógico (C4) ---
   - unique-id: plataforma-pagos
     node-type: system
@@ -185,7 +192,10 @@ relationships:
       deployed-in: { container: public-a, nodes: [alb] }
   - unique-id: d-private-a
     relationship-type:
-      deployed-in: { container: private-a, nodes: [payments-api, aurora-writer] }
+      deployed-in: { container: private-a, nodes: [sg-payments, aurora-writer] }
+  - unique-id: d-sg-payments
+    relationship-type:
+      deployed-in: { container: sg-payments, nodes: [payments-api] }
   - unique-id: d-public-b
     relationship-type:
       deployed-in: { container: public-b, nodes: [nat-b] }

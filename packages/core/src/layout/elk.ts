@@ -6,6 +6,7 @@ import { FONT, textWidth, wrap } from './text.ts';
 import type { Layout, LabelLine, PlacedEdge, PlacedLabel, PlacedNode, Point } from './types.ts';
 import { simplifyPolyline } from './polyline.ts';
 import { presetRules } from './presets.ts';
+import { groupBadgeSpace } from '../icons/groups.ts';
 import type { Model } from '../model/types.ts';
 
 // elkjs ships CommonJS; load it explicitly so ESM and the typings agree.
@@ -72,6 +73,8 @@ export async function layoutView(graph: ViewGraph, options: LayoutOptions = {}):
     const lines: LabelLine[] = isGroup ? [{ text: e.name, kind: 'group' }] : nodeLabelLines(e);
     labelLines.set(e.id, lines);
     const size = measure(lines);
+    // Group titles share the header with an optional badge; reserve its width too.
+    if (isGroup) size.width += groupBadgeSpace(e);
     const label: ElkLabel = { id: `${e.id}__label`, text: lines.map((l) => l.text).join('\n'), ...size };
     const node: ElkNode = isGroup
       ? {
@@ -280,6 +283,7 @@ function portFor(node: ElkNode, id: string, side: string, isGroup: boolean): str
 
 /** Frames overlay groups around their (already placed) descendants and fixes parent/depth links. */
 function placeOverlays(nodes: PlacedNode[], overlays: Set<string>, graph: ViewGraph, labelLines: Map<string, LabelLine[]>) {
+  const elementOf = new Map(graph.elements.map((e) => [e.id, e]));
   if (overlays.size === 0) return;
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const descendants = (id: string) => nodes.filter((n) => {
@@ -297,6 +301,7 @@ function placeOverlays(nodes: PlacedNode[], overlays: Set<string>, graph: ViewGr
     const y2 = Math.max(...inner.map((n) => Math.max(n.y + n.height, n.label.y + n.label.height))) + OVERLAY_PADDING.side;
     const lines = labelLines.get(id) ?? [];
     const size = measure(lines);
+    size.width += groupBadgeSpace(elementOf.get(id)!);
     const host = graph.parent.get(id);
     const overlay: PlacedNode = {
       id, x: x1, y: y1, width: x2 - x1, height: y2 - y1, isGroup: true, depth: 0, parent: host,

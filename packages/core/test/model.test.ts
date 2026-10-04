@@ -14,7 +14,8 @@ describe('CALM loading', () => {
     const ws = loadWorkspace(EXAMPLE);
     expect(ws.diagnostics).toEqual([]);
     expect(ws.model.elements.get('payments-api')).toMatchObject({ technology: 'Spring Boot on EKS', icon: 'aws/eks', c4: 'container' });
-    expect(ws.model.deployedIn.get('payments-api')).toBe('private-a');
+    expect(ws.model.deployedIn.get('payments-api')).toBe('sg-payments');
+    expect(ws.model.deployedIn.get('sg-payments')).toBe('private-a');
     expect(ws.model.composedOf.get('payments-api')).toBe('plataforma-pagos');
     expect(ws.views.map((v) => v.id)).toEqual(['contenedores-c4', 'infra-aws']);
   });
@@ -64,7 +65,7 @@ describe('views', () => {
 
   it('one model, two hierarchies: deployment nests by subnet, C4 by system', () => {
     const infra = projectView(ws.model, view('infra-aws'));
-    expect(infra.parent.get('payments-api')).toBe('private-a');
+    expect(infra.parent.get('payments-api')).toBe('sg-payments');
     expect(infra.elements.some((e) => e.id === 'plataforma-pagos')).toBe(false);
 
     const c4 = projectView(ws.model, view('contenedores-c4'));
