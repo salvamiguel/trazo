@@ -1,5 +1,13 @@
 # Aplicación web en Azure: ejemplo de la vista de infraestructura Azure de Trazo.
 $schema: https://calm.finos.org/release/1.2/meta/calm.json
+metadata:
+  trazo:
+    title: Aplicación web en Azure
+    description: Web pública con Front Door, App Service y Azure SQL, desplegada en dos regiones.
+    owner: Equipo Canales digitales
+    domain: Canales
+    status: Borrador
+    tags: [azure, web]
 nodes:
   - unique-id: usuarios
     node-type: actor

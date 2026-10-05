@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { TEMPLATES, VIEW_KINDS, type Template, type ViewKind } from './templates.ts';
 import { Close } from './icons.tsx';
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" role="dialog" aria-label={title} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
@@ -16,7 +16,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-function useAutofocus<T extends HTMLElement>() {
+export function useAutofocus<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   useEffect(() => {
     ref.current?.focus();

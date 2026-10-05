@@ -13,6 +13,10 @@ interface Props {
   onSaveToFolder: () => void;
   onUnlink: () => void;
   onHistory: () => void;
+  onCatalog: () => void;
+  /** Library the open architecture came from; saving publishes there. */
+  publishTo?: string;
+  onPublish: () => void;
 }
 
 const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -65,11 +69,14 @@ export function FileMenu(p: Props & { pickFiles: () => void; pickFolder: () => v
         <>
           <div className="menu-backdrop" onClick={() => setOpen(false)} />
           <div className="menu file-menu" role="menu">
+            {item('Catálogo de arquitecturas', p.onCatalog)}
             {item('Nuevo diagrama…', p.onNew)}
             {item('Abrir fichero…', p.pickFiles, `${MOD}O`)}
             {p.canLinkFolders ? item('Abrir carpeta…', p.onOpenFolder) : item('Importar carpeta…', p.pickFolder)}
             <div className="menu-sep" />
-            {item(p.folder ? `Guardar en ${p.folder}` : 'Guardar…', p.onSave, `${MOD}S`)}
+            {p.publishTo
+              ? item(`Publicar en ${p.publishTo}…`, p.onPublish, `${MOD}S`)
+              : item(p.folder ? `Guardar en ${p.folder}` : 'Guardar…', p.onSave, `${MOD}S`)}
             {item('Descargar como .zip', p.onDownload)}
             {p.canLinkFolders && !p.folder && item('Guardar en una carpeta…', p.onSaveToFolder)}
             {p.folder && item('Dejar de sincronizar con la carpeta', p.onUnlink)}

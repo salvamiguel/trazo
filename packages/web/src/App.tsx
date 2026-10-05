@@ -35,7 +35,7 @@ import {
   type DirHandle,
   type OpenedFolder,
 } from './folder.ts';
-import { Alert, Check, Code, Command, Connect, Dots, Download, Folder, History, Logo, Moon, PanelLeft, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
+import { Alert, Check, Code, Command, Grid, Upload, Connect, Dots, Download, Folder, History, Logo, Moon, PanelLeft, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
 import * as history from './history.ts';
 import { HistoryPanel, versionTime } from './HistoryPanel.tsx';
 import { svgToPng } from './png.ts';
@@ -46,6 +46,11 @@ import { drawioFor, useDiagram } from './useDiagram.ts';
 import { WorkspaceMenu } from './WorkspaceMenu.tsx';
 import { FileMenu, MOD, useFilePickers } from './FileMenu.tsx';
 import { writeZip } from './zip.ts';
+import { Catalog } from './Catalog.tsx';
+import { ConnectLibraryDialog, NewArchitectureDialog, PublishDialog } from './LibraryDialogs.tsx';
+import { matchesVersion } from './storage/git.ts';
+import { listLibraries, openLibrary } from './storage/libraries.ts';
+import type { CatalogEntry as ArchEntry, Library as ArchLibrary, LibraryConfig, Origin } from './storage/types.ts';
 import * as store from './workspaces.ts';
 
 const THEME_KEY = 'trazo.theme';
@@ -102,7 +107,10 @@ type Dialog =
   | { kind: 'new-view' }
   | { kind: 'rename-view'; id: string }
   | { kind: 'delete-view'; id: string }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  | { kind: 'connect-library'; editing?: LibraryConfig & { kind: 'github' | 'gitlab' } }
+  | { kind: 'new-architecture'; library: LibraryConfig }
+  | { kind: 'publish' };
 
 /** A workspace synced with a folder on disk; `ok` is false until write access is granted. */
 interface FolderLink {
@@ -151,6 +159,10 @@ export function App() {
   const focusName = (id: string) => setFocusReq((r) => ({ id, n: r.n + 1 }));
   const [quickAdd, setQuickAdd] = useState<{ source: string; at: Point; group?: string }>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [screen, setScreen] = useState<'editor' | 'catalog'>('editor');
+  /** Bumped when libraries or published versions change, so the catalog re-reads them. */
+  const [catalogRev, setCatalogRev] = useState(0);
+  const [catalogFocus, setCatalogFocus] = useState<string>();
   /** An earlier version shown read-only on the canvas and in the editor. */
   const [preview, setPreview] = useState<history.Version>();
   const editor = useRef<ReactCodeMirrorRef>(null);
@@ -328,6 +340,10 @@ export function App() {
       }
       if (typing() || paletteOpen || dialog) return;
       const key = e.key.toLowerCase();
+      if (screen === 'catalog') {
+        if (e.key === 'Escape') setScreen('editor');
+        return;
+      }
       if (preview) {
         if (e.key === 'Escape') setPreview(undefined);
         return;
@@ -450,6 +466,7 @@ export function App() {
   const saveNow = async () => {
     store.saveSources(wsId, current.current);
     void history.snapshot(wsId, current.current, { force: true });
+    if (origin) return startPublish();
     if (link) {
       if (!link.ok) return reconnect();
       try {
@@ -460,6 +477,71 @@ export function App() {
       }
     } else if (canLinkFolders) await saveToFolder();
     else downloadZip();
+  };
+
+  // ---- Libraries -----------------------------------------------------------------------------
+  const origin = activeMeta.origin;
+  const originLibrary = origin ? listLibraries().find((l) => l.id === origin.library) : undefined;
+  const [unpublished, setUnpublished] = useState(false);
+  useEffect(() => {
+    if (!origin) return setUnpublished(false);
+    let alive = true;
+    const t = setTimeout(() => {
+      void matchesVersion(origin.path, sources, origin.modelFile, origin.version).then((same) => alive && setUnpublished(!same));
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [sources, origin]);
+
+  /** Opens an architecture: its workspace if one is already open from there, else a new local copy. */
+  const openFromLibrary = async (library: ArchLibrary, entry: ArchEntry) => {
+    try {
+      if (library.config.kind === 'browser') {
+        if (entry.path !== wsId) switchTo(entry.path);
+      } else {
+        const existing = store.listWorkspaces().find((w) => w.origin?.library === library.config.id && w.origin?.path === entry.path);
+        if (existing) {
+          if (existing.id !== wsId) switchTo(existing.id);
+        } else {
+          const loaded = await library.load(entry.path);
+          const o: Origin = { library: library.config.id, path: entry.path, modelFile: loaded.modelFile, version: loaded.version };
+          const meta = store.createWorkspace(entry.title, loaded.sources, undefined, o);
+          switchTo(meta.id, loaded.sources);
+        }
+      }
+      setScreen('editor');
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const createArchitecture = (library: LibraryConfig, title: string, folder: string, sources: WorkspaceSources) => {
+    const o: Origin | undefined = library.kind === 'browser' ? undefined : { library: library.id, path: folder, modelFile: MODEL_FILE, version: {} };
+    const meta = store.createWorkspace(title, sources, undefined, o);
+    switchTo(meta.id, sources);
+    setScreen('editor');
+    setDialog(undefined);
+  };
+
+  const publish = async (message: string, review: boolean, force: boolean) => {
+    if (!origin || !originLibrary) throw new Error('La biblioteca de esta arquitectura ya no está conectada.');
+    store.saveSources(wsId, current.current);
+    const r = await openLibrary(originLibrary).publish(origin.path, current.current, origin.modelFile, origin.version, { message, review, force, branch: origin.branch });
+    if (r.ok) {
+      store.touch(wsId, { origin: { ...origin, version: r.version, published: r.url, branch: r.branch } });
+      setWorkspaces(store.listWorkspaces());
+      setCatalogRev((n) => n + 1);
+      void history.snapshot(wsId, current.current, { name: review ? 'Publicada para revisión' : 'Publicada' });
+    }
+    return r;
+  };
+  const startPublish = () => {
+    if (!origin) return;
+    if (!originLibrary) return fail(new Error('La biblioteca de esta arquitectura ya no está conectada. Vuelve a conectarla desde el catálogo.'));
+    if (!openLibrary(originLibrary).canWrite) return fail(new Error(`«${originLibrary.name}» es de solo lectura: añade un token desde el catálogo para publicar, o descarga una copia .zip.`));
+    setDialog({ kind: 'publish' });
   };
 
   // ---- Version history -----------------------------------------------------------------------
@@ -525,6 +607,9 @@ export function App() {
     { id: 'tab-view', group: 'Editor', label: 'Editar la vista actual', run: () => setTab('view') },
     ...exports.map((x) => ({ id: `export-${x.id}`, group: 'Exportar', label: `Exportar ${x.label}`, run: x.run })),
     { id: 'new-view', group: 'Vistas', label: 'Nueva vista…', run: () => setDialog({ kind: 'new-view' }) },
+    { id: 'catalog', group: 'Bibliotecas', label: 'Abrir el catálogo de arquitecturas', run: () => setScreen('catalog') },
+    { id: 'connect', group: 'Bibliotecas', label: 'Conectar un repositorio Git…', run: () => setDialog({ kind: 'connect-library' }) },
+    ...(origin ? [{ id: 'publish', group: 'Bibliotecas', label: `Publicar en ${originLibrary?.name ?? 'la biblioteca'}…`, run: startPublish }] : []),
     { id: 'new-ws', group: 'Archivo', label: 'Nuevo diagrama…', run: () => setDialog({ kind: 'new-workspace' }) },
     { id: 'open-file', group: 'Archivo', label: `Abrir fichero… (${MOD}O)`, run: pickers.pickFiles },
     ...(canLinkFolders ? [{ id: 'open-folder', group: 'Archivo', label: 'Abrir carpeta…', run: openFolderAction }] : []),
@@ -556,6 +641,9 @@ export function App() {
           <Logo />
           <span className="brand-name">Trazo</span>
           {pickers.inputs}
+          <button className={`menu-button${screen === 'catalog' ? ' active' : ''}`} onClick={() => setScreen(screen === 'catalog' ? 'editor' : 'catalog')} aria-pressed={screen === 'catalog'}>
+            <Grid size={14} /> Catálogo
+          </button>
           <FileMenu
             canLinkFolders={canLinkFolders}
             folder={link?.handle.name}
@@ -569,6 +657,9 @@ export function App() {
             onSaveToFolder={saveToFolder}
             onUnlink={unlink}
             onHistory={openHistory}
+            onCatalog={() => setScreen('catalog')}
+            publishTo={origin ? (originLibrary?.name ?? 'la biblioteca') : undefined}
+            onPublish={startPublish}
           />
           <span className="crumb">/</span>
           <WorkspaceMenu
@@ -579,7 +670,16 @@ export function App() {
             onRename={() => setDialog({ kind: 'rename-workspace' })}
             onDelete={() => setDialog({ kind: 'delete-workspace' })}
           />
-          {link && !link.ok ? (
+          {origin ? (
+            <button
+              className={`save-state origin${unpublished ? ' unpublished' : ''}`}
+              onClick={startPublish}
+              title={unpublished ? `Hay cambios guardados en este navegador que aún no están en ${originLibrary?.name ?? 'su biblioteca'}` : `Igual que en ${originLibrary?.name ?? 'su biblioteca'}`}
+            >
+              {unpublished ? <Upload size={13} /> : <Check size={13} />}
+              <span>{unpublished ? 'Publicar' : 'Al día'}</span>
+            </button>
+          ) : link && !link.ok ? (
             <button className="save-state reconnect" onClick={reconnect} title={link.error ?? 'El navegador pide permiso de nuevo tras recargar'}>
               <Folder size={13} /> Reconectar {link.handle.name}
             </button>
@@ -645,7 +745,20 @@ export function App() {
         </div>
       </header>
 
-      <main className={`workspace${editorOpen ? '' : ' no-editor'}`}>
+      {screen === 'catalog' && (
+        <Catalog
+          theme={theme}
+          initial={origin?.library}
+          focus={catalogFocus}
+          revision={catalogRev}
+          onOpen={(lib, e) => void openFromLibrary(lib, e)}
+          onNew={(library) => setDialog({ kind: 'new-architecture', library })}
+          onConnect={() => setDialog({ kind: 'connect-library' })}
+          onEdit={(l) => l.kind !== 'browser' && setDialog({ kind: 'connect-library', editing: l })}
+          onClose={() => setScreen('editor')}
+        />
+      )}
+      <main className={`workspace${editorOpen ? '' : ' no-editor'}`} hidden={screen === 'catalog'}>
         {editorOpen && <section className="panel">
           <div className="panel-tabs">
             <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>
@@ -921,6 +1034,35 @@ export function App() {
             commit({ ...sources, views });
             setDialog(undefined);
           }}
+        />
+      )}
+      {dialog?.kind === 'connect-library' && (
+        <ConnectLibraryDialog
+          editing={dialog.editing}
+          onClose={() => setDialog(undefined)}
+          onDone={(config) => {
+            setDialog(undefined);
+            setCatalogFocus(config.id);
+            setCatalogRev((n) => n + 1);
+          }}
+        />
+      )}
+      {dialog?.kind === 'new-architecture' && (
+        <NewArchitectureDialog
+          library={dialog.library}
+          onClose={() => setDialog(undefined)}
+          onCreate={(title, folder, t) => createArchitecture(dialog.library, title, folder, t.sources)}
+        />
+      )}
+      {dialog?.kind === 'publish' && origin && originLibrary && originLibrary.kind !== 'browser' && (
+        <PublishDialog
+          library={originLibrary}
+          path={origin.path}
+          title={activeMeta.name}
+          isNew={!Object.keys(origin.version).length}
+          openReview={origin.branch ? origin.published : undefined}
+          onPublish={publish}
+          onClose={() => setDialog(undefined)}
         />
       )}
       {dialog?.kind === 'error' && <ErrorDialog message={dialog.message} onClose={() => setDialog(undefined)} />}
