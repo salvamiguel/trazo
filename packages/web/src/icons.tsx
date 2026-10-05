@@ -35,3 +35,4 @@ export const Dots = ({ size }: P) => (<svg {...base(size)}><circle cx="5" cy="12
 export const Eye = ({ size }: P) => (<svg {...base(size)}><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>);
 export const History = ({ size }: P) => (<svg {...base(size)}><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>);
 export const Image = ({ size }: P) => (<svg {...base(size)}><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M20.5 16l-5-5-9 8.5" /></svg>);
+export const PanelLeft = ({ size }: P) => (<svg {...base(size)}><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 4.5v15M15.5 10l-2 2 2 2" /></svg>);

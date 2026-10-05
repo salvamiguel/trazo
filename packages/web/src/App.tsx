@@ -27,6 +27,7 @@ import {
   openFolder,
   pickSaveFolder,
   readPickedFiles,
+  workspaceFiles,
   recallFolder,
   rememberFolder,
   writeFolder,
@@ -34,7 +35,7 @@ import {
   type DirHandle,
   type OpenedFolder,
 } from './folder.ts';
-import { Alert, Check, Command, Connect, Dots, Download, Folder, History, Logo, Moon, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
+import { Alert, Check, Code, Command, Connect, Dots, Download, Folder, History, Logo, Moon, PanelLeft, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
 import * as history from './history.ts';
 import { HistoryPanel, versionTime } from './HistoryPanel.tsx';
 import { svgToPng } from './png.ts';
@@ -43,9 +44,12 @@ import { entryByKey, Library, Picker } from './Library.tsx';
 import { TEMPLATES, viewYaml } from './templates.ts';
 import { drawioFor, useDiagram } from './useDiagram.ts';
 import { WorkspaceMenu } from './WorkspaceMenu.tsx';
+import { FileMenu, MOD, useFilePickers } from './FileMenu.tsx';
+import { writeZip } from './zip.ts';
 import * as store from './workspaces.ts';
 
 const THEME_KEY = 'trazo.theme';
+const EDITOR_KEY = 'trazo.editor';
 const HISTORY_LIMIT = 100;
 
 function load<T>(key: string, fallback: T): T {
@@ -133,6 +137,9 @@ export function App() {
     if (!(viewId in sources.views) && viewIds[0]) setViewId(viewIds[0]);
   }, [viewId, sources.views, viewIds]);
   const [tab, setTab] = useState<Tab>('model');
+  const [editorOpen, setEditorOpen] = useState(() => load(EDITOR_KEY, true));
+  useEffect(() => save(EDITOR_KEY, editorOpen), [editorOpen]);
+  const toggleEditor = () => setEditorOpen((o) => !o);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [saved, setSaved] = useState(true);
@@ -243,6 +250,7 @@ export function App() {
   /** Scrolls the YAML to an element's definition; `focus` moves the caret there too. */
   const reveal = useCallback((id: string, focus = false) => {
     setTab('model');
+    if (focus) setEditorOpen(true);
     requestAnimationFrame(() => {
       const cm = editor.current?.view;
       if (!cm) return;
@@ -301,6 +309,21 @@ export function App() {
       if (mod && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen((o) => !o);
+        return;
+      }
+      if (mod && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        void saveNow();
+        return;
+      }
+      if (mod && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        pickers.pickFiles();
+        return;
+      }
+      if (mod && e.key === '\\') {
+        e.preventDefault();
+        toggleEditor();
         return;
       }
       if (typing() || paletteOpen || dialog) return;
@@ -419,6 +442,26 @@ export function App() {
 
   const activeMeta = workspaces.find((w) => w.id === wsId) ?? workspaces[0]!;
 
+  const pickers = useFilePickers(importFiles);
+  const zipName = () => `${activeMeta.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'trazo'}.zip`;
+  const downloadZip = () =>
+    download(zipName(), new Blob([writeZip(workspaceFiles(current.current, link?.modelFile)) as BlobPart], { type: 'application/zip' }), 'application/zip');
+  /** ⌘S: writes to the synced folder now; otherwise picks a folder to sync with, or downloads a .zip. */
+  const saveNow = async () => {
+    store.saveSources(wsId, current.current);
+    void history.snapshot(wsId, current.current, { force: true });
+    if (link) {
+      if (!link.ok) return reconnect();
+      try {
+        await writeFolder(link.handle, current.current, link.modelFile);
+        setSaved(true);
+      } catch (err) {
+        fail(err);
+      }
+    } else if (canLinkFolders) await saveToFolder();
+    else downloadZip();
+  };
+
   // ---- Version history -----------------------------------------------------------------------
   const openHistory = () => {
     setHistoryOpen(true);
@@ -477,12 +520,16 @@ export function App() {
     { id: 'history', group: 'Historial', label: 'Ver historial de versiones', run: openHistory },
     { id: 'save-version', group: 'Historial', label: 'Guardar versión con nombre…', run: openHistory },
     { id: 'theme', group: 'Apariencia', label: theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro', run: () => setTheme(theme === 'dark' ? 'light' : 'dark') },
+    { id: 'editor', group: 'Editor', label: editorOpen ? 'Ocultar el editor de código' : 'Mostrar el editor de código', run: toggleEditor },
     { id: 'tab-model', group: 'Editor', label: 'Editar el modelo CALM', run: () => setTab('model') },
     { id: 'tab-view', group: 'Editor', label: 'Editar la vista actual', run: () => setTab('view') },
     ...exports.map((x) => ({ id: `export-${x.id}`, group: 'Exportar', label: `Exportar ${x.label}`, run: x.run })),
     { id: 'new-view', group: 'Vistas', label: 'Nueva vista…', run: () => setDialog({ kind: 'new-view' }) },
-    { id: 'new-ws', group: 'Workspace', label: 'Nuevo workspace…', run: () => setDialog({ kind: 'new-workspace' }) },
-    ...(canLinkFolders ? [{ id: 'open-folder', group: 'Workspace', label: 'Abrir carpeta…', run: openFolderAction }] : []),
+    { id: 'new-ws', group: 'Archivo', label: 'Nuevo diagrama…', run: () => setDialog({ kind: 'new-workspace' }) },
+    { id: 'open-file', group: 'Archivo', label: `Abrir fichero… (${MOD}O)`, run: pickers.pickFiles },
+    ...(canLinkFolders ? [{ id: 'open-folder', group: 'Archivo', label: 'Abrir carpeta…', run: openFolderAction }] : []),
+    { id: 'save', group: 'Archivo', label: `Guardar (${MOD}S)`, run: () => void saveNow() },
+    { id: 'zip', group: 'Archivo', label: 'Descargar como .zip', run: downloadZip },
     ...workspaces.filter((w) => w.id !== wsId).map((w) => ({ id: `ws-${w.id}`, group: 'Workspace', label: `Abrir ${w.name}`, run: () => switchTo(w.id) })),
   ];
 
@@ -508,18 +555,27 @@ export function App() {
         <div className="brand">
           <Logo />
           <span className="brand-name">Trazo</span>
+          {pickers.inputs}
+          <FileMenu
+            canLinkFolders={canLinkFolders}
+            folder={link?.handle.name}
+            pickFiles={pickers.pickFiles}
+            pickFolder={pickers.pickFolder}
+            onNew={() => setDialog({ kind: 'new-workspace' })}
+            onOpenFiles={importFiles}
+            onOpenFolder={openFolderAction}
+            onSave={() => void saveNow()}
+            onDownload={downloadZip}
+            onSaveToFolder={saveToFolder}
+            onUnlink={unlink}
+            onHistory={openHistory}
+          />
           <span className="crumb">/</span>
           <WorkspaceMenu
             workspaces={workspaces}
             active={activeMeta}
-            canLinkFolders={canLinkFolders}
-            linked={!!link}
             onSwitch={(id) => id !== wsId && switchTo(id)}
             onNew={() => setDialog({ kind: 'new-workspace' })}
-            onOpenFolder={openFolderAction}
-            onImportFiles={importFiles}
-            onSaveToFolder={saveToFolder}
-            onUnlink={unlink}
             onRename={() => setDialog({ kind: 'rename-workspace' })}
             onDelete={() => setDialog({ kind: 'delete-workspace' })}
           />
@@ -562,6 +618,9 @@ export function App() {
           <button className="ghost-btn" onClick={() => setPaletteOpen(true)} title="Paleta de comandos">
             <Command size={14} /> <span className="kbd">⌘K</span>
           </button>
+          <button className={`icon-btn${editorOpen ? ' active' : ''}`} onClick={toggleEditor} title={`${editorOpen ? 'Ocultar' : 'Mostrar'} el editor de código (⌘\\)`} aria-pressed={editorOpen}>
+            <Code />
+          </button>
           <button className={`icon-btn${historyOpen ? ' active' : ''}`} onClick={() => (historyOpen ? closeHistory() : openHistory())} title="Historial de versiones" aria-pressed={historyOpen}>
             <History />
           </button>
@@ -586,8 +645,8 @@ export function App() {
         </div>
       </header>
 
-      <main className="workspace">
-        <section className="panel">
+      <main className={`workspace${editorOpen ? '' : ' no-editor'}`}>
+        {editorOpen && <section className="panel">
           <div className="panel-tabs">
             <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>
               {link?.modelFile ?? MODEL_FILE}
@@ -596,6 +655,7 @@ export function App() {
               {viewId}.view.yaml
             </button>
             <span className="grow" />
+            <button className="icon-btn small" title="Ocultar el editor (⌘\\)" onClick={toggleEditor}><PanelLeft size={15} /></button>
           </div>
           <div className="editor">
             <CodeMirror
@@ -629,7 +689,7 @@ export function App() {
               </ul>
             )}
           </footer>
-        </section>
+        </section>}
 
         <section className="stage" ref={stage}>
           <Canvas

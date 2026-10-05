@@ -4,6 +4,7 @@
  * the browser has it (Chrome, Edge); elsewhere files can still be imported read-only.
  */
 import type { WorkspaceSources } from '@trazo/core';
+import { readZip, type ZipEntry } from './zip.ts';
 
 export const MODEL_FILE = 'architecture.calm.yaml';
 const MODEL_RE = /\.calm\.(ya?ml|json)$/i;
@@ -91,24 +92,48 @@ export async function ensurePermission(dir: DirHandle): Promise<boolean> {
   return (await dir.requestPermission({ mode: 'readwrite' })) === 'granted';
 }
 
-/** Reads a workspace from files chosen with an <input type="file"> (any browser, read-only). */
-export async function readPickedFiles(files: FileList): Promise<OpenedFolder> {
+/**
+ * A workspace from a flat list of files (paths relative to some root): the model is any
+ * `*.calm.yaml`, preferring `architecture.calm.yaml`; views are `*.view.yaml` anywhere.
+ */
+export function workspaceFromFiles(files: ZipEntry[], fallbackName: string): OpenedFolder {
   let model: string | undefined;
   let modelFile = MODEL_FILE;
-  let name = 'Importado';
+  let name = fallbackName;
   const views: Record<string, string> = {};
-  for (const file of Array.from(files)) {
-    const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-    if (path.includes('/')) name = path.split('/')[0]!;
-    const m = VIEW_RE.exec(file.name);
-    if (m) views[m[1]!] = await file.text();
-    else if (MODEL_RE.test(file.name) && (model === undefined || file.name === MODEL_FILE)) {
-      model = await file.text();
-      modelFile = file.name;
+  for (const { path, text } of files) {
+    const base = path.split('/').pop()!;
+    if (path.includes('/') && !path.startsWith('views/')) name = path.split('/')[0]!;
+    const m = VIEW_RE.exec(base);
+    if (m) views[m[1]!] = text;
+    else if (MODEL_RE.test(base) && (model === undefined || base === MODEL_FILE)) {
+      model = text;
+      modelFile = base;
     }
   }
   if (model === undefined) throw new Error('Entre los ficheros elegidos no hay ningún *.calm.yaml.');
   return { name, sources: { model, views }, modelFile };
+}
+
+/** The files a workspace is saved as, in the layout the CLI and folders use. */
+export function workspaceFiles(sources: WorkspaceSources, modelFile = MODEL_FILE): ZipEntry[] {
+  return [
+    { path: modelFile, text: sources.model },
+    ...Object.keys(sources.views)
+      .sort()
+      .map((id) => ({ path: `views/${id}.view.yaml`, text: sources.views[id]! })),
+  ];
+}
+
+/** Reads a workspace from files chosen with an <input type="file">: YAML files, a folder or a .zip. */
+export async function readPickedFiles(files: FileList): Promise<OpenedFolder> {
+  const list = Array.from(files);
+  const zip = list.find((f) => /\.zip$/i.test(f.name));
+  if (zip) return workspaceFromFiles(await readZip(await zip.arrayBuffer()), zip.name.replace(/(\.trazo)?\.zip$/i, ''));
+  const entries = await Promise.all(
+    list.map(async (f) => ({ path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name, text: await f.text() })),
+  );
+  return workspaceFromFiles(entries, 'Importado');
 }
 
 // ---- Remember folder links across reloads (IndexedDB can store directory handles) -----------

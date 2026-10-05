@@ -125,6 +125,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .ws-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-button:hover { background: var(--hover); color: var(--fg); }
+.menu-button {
+  display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border: 0; border-radius: 7px;
+  background: none; color: var(--muted); font: inherit; font-size: 13px;
+}
+.menu-button:hover, .menu-button[aria-expanded='true'] { background: var(--hover); color: var(--fg); }
+.file-menu { left: 0; right: auto; min-width: 250px; }
+.menu-kbd { font-size: 11px; color: var(--faint); }
 .ws-menu { left: 0; right: auto; width: 300px; }
 .ws-item .ws-check { width: 14px; display: inline-grid; color: var(--accent); }
 .ws-item .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -176,6 +183,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Workspace */
 .workspace { flex: 1; display: grid; grid-template-columns: minmax(340px, 34%) 1fr; min-height: 0; }
+.workspace.no-editor { grid-template-columns: 1fr; }
 .panel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--border); }
 .panel-tabs { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border); }
 .panel-tabs > button:not(.icon-btn) {
@@ -389,6 +397,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .views { grid-column: 1 / -1; grid-row: 2; overflow-x: auto; }
   .crumb, .crumb-ws, .save-state, .ghost-btn { display: none; }
   .workspace { grid-template-columns: 1fr; grid-template-rows: 55% 45%; }
+  .workspace.no-editor { grid-template-rows: 1fr; }
   .panel { order: 2; border-right: 0; border-top: 1px solid var(--border); }
   .hint { display: none; }
   .library { left: 8px; right: 8px; top: 64px; width: auto; }
