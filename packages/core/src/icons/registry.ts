@@ -79,7 +79,8 @@ export function getIcon(ref: string | undefined): IconSvg | null {
   const body = replaceIDs(rendered.body);
   const viewBox = rendered.attributes.viewBox;
   const mono = body.includes('currentColor');
-  const standalone = iconToHTML(mono ? body.replaceAll('currentColor', MONO_COLOR) : body, { ...rendered.attributes, xmlns: 'http://www.w3.org/2000/svg' });
+  // iconToHTML already adds xmlns; a second one makes the SVG invalid XML (broken images in draw.io).
+  const standalone = iconToHTML(mono ? body.replaceAll('currentColor', MONO_COLOR) : body, rendered.attributes);
   const icon = { mono, svg: standalone, body, viewBox };
   cache.set(id, icon);
   return icon;

@@ -59,6 +59,14 @@ describe.each(ws.views.map((v) => [v.id, v] as const))('view %s', (_id, view) =>
     expect(cells.filter((c) => c.edge).length).toBe(layout.edges.length);
     const badges = cells.filter((c) => c.id?.endsWith('-badge'));
     expect(cells.filter((c) => c.vertex).length).toBe(layout.nodes.length + badges.length);
+    // Every embedded icon must decode to a well-formed SVG, or draw.io shows a broken image.
+    const images = cells.flatMap((c) => /(?:^|;)image=data:image\/svg\+xml,([^;]+)/.exec(c.style ?? '')?.[1] ?? []);
+    expect(images.length).toBeGreaterThan(0);
+    for (const b64 of images) {
+      const svg = new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)));
+      expect(XMLValidator.validate(svg), svg.slice(0, 120)).toBe(true);
+      expect(svg).toMatch(/^<svg [^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+    }
     // AWS groups use draw.io's native group shapes; the rest carry an image badge.
     if (view.id === 'infra-aws') {
       const vpc = cells.find((c) => c.id === 't-vpc')!;

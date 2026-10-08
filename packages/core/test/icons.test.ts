@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { XMLValidator } from 'fast-xml-parser';
 import { describe, expect, it } from 'vitest';
 import { CURATED, GROUP_ICONS, getIcon, isIconSetLoaded, layoutModelView, missingIconSets, resolveIconId } from '../src/index.ts';
 import { loadWorkspace } from '../src/workspace.ts';
@@ -9,6 +10,11 @@ describe('icon packs', () => {
     const refs = [...Object.values(CURATED).flatMap((l) => l.map(([ref]) => ref)), ...Object.values(GROUP_ICONS)];
     for (const ref of refs) expect(getIcon(ref), ref).not.toBeNull();
     expect(isIconSetLoaded('aws') || isIconSetLoaded('azure') || isIconSetLoaded('logos')).toBe(false);
+  });
+
+  it('produces standalone SVGs that are well-formed XML', () => {
+    const refs = [...Object.values(CURATED).flatMap((l) => l.map(([ref]) => ref)), ...Object.values(GROUP_ICONS), 'tabler:user'];
+    for (const ref of refs) expect(XMLValidator.validate(getIcon(ref)!.svg), ref).toBe(true);
   });
 
   it('maps short names to the official AWS and Azure icons', () => {
