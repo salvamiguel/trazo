@@ -209,8 +209,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background-size: 20px 20px;
 }
 .canvas:active { cursor: grabbing; }
-.canvas-content { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
-.canvas-content > div > svg { display: block; border-radius: 10px; box-shadow: var(--shadow); }
+.canvas-content { position: absolute; left: 0; top: 0; }
+.canvas-content > div { width: 100%; height: 100%; }
+.canvas-content > div > svg { display: block; width: 100%; height: 100%; border-radius: 10px; box-shadow: var(--shadow); }
 .canvas-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 .zoom {
   position: absolute; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 4px;
@@ -224,7 +225,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .hint { position: absolute; left: 16px; right: 200px; bottom: 20px; color: var(--faint); font-size: 12px; pointer-events: none; }
 
 /* Editing overlay (diagram coordinates, drawn above the SVG) */
-.overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .ov-select { fill: none; stroke: var(--accent); }
 .ov-target { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 6 4; }
 .ov-edge { fill: none; stroke: var(--accent); stroke-linejoin: round; opacity: 0.85; }

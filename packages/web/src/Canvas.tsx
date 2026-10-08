@@ -448,7 +448,16 @@ export function Canvas(props: Props) {
         props.onDropEntry(key, canNest && layout ? groupAt(toDiagram(e.clientX, e.clientY))?.id : undefined);
       }}
     >
-      <div className="canvas-content" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
+      {/* Zoom resizes the SVGs instead of CSS-scaling a layer, so the browser redraws vectors at
+          every zoom level rather than stretching a bitmap rastered at the old scale. */}
+      <div
+        className="canvas-content"
+        style={{
+          transform: `translate(${view.x}px, ${view.y}px)`,
+          width: layout ? layout.width * view.k : undefined,
+          height: layout ? layout.height * view.k : undefined,
+        }}
+      >
         <div ref={content} dangerouslySetInnerHTML={svg ? { __html: svg } : undefined} />
         {overlay}
       </div>
