@@ -27,6 +27,7 @@ import {
   openFolder,
   pickSaveFolder,
   readPickedFiles,
+  workspaceFiles,
   recallFolder,
   rememberFolder,
   writeFolder,
@@ -34,7 +35,7 @@ import {
   type DirHandle,
   type OpenedFolder,
 } from './folder.ts';
-import { Alert, Check, Command, Connect, Dots, Download, Folder, History, Logo, Moon, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
+import { Alert, Check, Code, Command, Grid, Upload, Connect, Dots, Download, Folder, History, Logo, Moon, PanelLeft, Plus, Pointer, Redo, Shapes, Sun, Undo } from './icons.tsx';
 import * as history from './history.ts';
 import { HistoryPanel, versionTime } from './HistoryPanel.tsx';
 import { svgToPng } from './png.ts';
@@ -43,9 +44,17 @@ import { entryByKey, Library, Picker } from './Library.tsx';
 import { TEMPLATES, viewYaml } from './templates.ts';
 import { drawioFor, useDiagram } from './useDiagram.ts';
 import { WorkspaceMenu } from './WorkspaceMenu.tsx';
+import { FileMenu, MOD, useFilePickers } from './FileMenu.tsx';
+import { writeZip } from './zip.ts';
+import { Catalog } from './Catalog.tsx';
+import { ConnectLibraryDialog, NewArchitectureDialog, PublishDialog } from './LibraryDialogs.tsx';
+import { matchesVersion } from './storage/git.ts';
+import { listLibraries, openLibrary } from './storage/libraries.ts';
+import type { CatalogEntry as ArchEntry, Library as ArchLibrary, LibraryConfig, Origin } from './storage/types.ts';
 import * as store from './workspaces.ts';
 
 const THEME_KEY = 'trazo.theme';
+const EDITOR_KEY = 'trazo.editor';
 const HISTORY_LIMIT = 100;
 
 function load<T>(key: string, fallback: T): T {
@@ -98,7 +107,10 @@ type Dialog =
   | { kind: 'new-view' }
   | { kind: 'rename-view'; id: string }
   | { kind: 'delete-view'; id: string }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string }
+  | { kind: 'connect-library'; editing?: LibraryConfig & { kind: 'github' | 'gitlab' } }
+  | { kind: 'new-architecture'; library: LibraryConfig }
+  | { kind: 'publish' };
 
 /** A workspace synced with a folder on disk; `ok` is false until write access is granted. */
 interface FolderLink {
@@ -133,6 +145,9 @@ export function App() {
     if (!(viewId in sources.views) && viewIds[0]) setViewId(viewIds[0]);
   }, [viewId, sources.views, viewIds]);
   const [tab, setTab] = useState<Tab>('model');
+  const [editorOpen, setEditorOpen] = useState(() => load(EDITOR_KEY, true));
+  useEffect(() => save(EDITOR_KEY, editorOpen), [editorOpen]);
+  const toggleEditor = () => setEditorOpen((o) => !o);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [saved, setSaved] = useState(true);
@@ -144,6 +159,10 @@ export function App() {
   const focusName = (id: string) => setFocusReq((r) => ({ id, n: r.n + 1 }));
   const [quickAdd, setQuickAdd] = useState<{ source: string; at: Point; group?: string }>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [screen, setScreen] = useState<'editor' | 'catalog'>('editor');
+  /** Bumped when libraries or published versions change, so the catalog re-reads them. */
+  const [catalogRev, setCatalogRev] = useState(0);
+  const [catalogFocus, setCatalogFocus] = useState<string>();
   /** An earlier version shown read-only on the canvas and in the editor. */
   const [preview, setPreview] = useState<history.Version>();
   const editor = useRef<ReactCodeMirrorRef>(null);
@@ -243,6 +262,7 @@ export function App() {
   /** Scrolls the YAML to an element's definition; `focus` moves the caret there too. */
   const reveal = useCallback((id: string, focus = false) => {
     setTab('model');
+    if (focus) setEditorOpen(true);
     requestAnimationFrame(() => {
       const cm = editor.current?.view;
       if (!cm) return;
@@ -303,8 +323,27 @@ export function App() {
         setPaletteOpen((o) => !o);
         return;
       }
+      if (mod && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        void saveNow();
+        return;
+      }
+      if (mod && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        pickers.pickFiles();
+        return;
+      }
+      if (mod && e.key === '\\') {
+        e.preventDefault();
+        toggleEditor();
+        return;
+      }
       if (typing() || paletteOpen || dialog) return;
       const key = e.key.toLowerCase();
+      if (screen === 'catalog') {
+        if (e.key === 'Escape') setScreen('editor');
+        return;
+      }
       if (preview) {
         if (e.key === 'Escape') setPreview(undefined);
         return;
@@ -419,6 +458,92 @@ export function App() {
 
   const activeMeta = workspaces.find((w) => w.id === wsId) ?? workspaces[0]!;
 
+  const pickers = useFilePickers(importFiles);
+  const zipName = () => `${activeMeta.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'trazo'}.zip`;
+  const downloadZip = () =>
+    download(zipName(), new Blob([writeZip(workspaceFiles(current.current, link?.modelFile)) as BlobPart], { type: 'application/zip' }), 'application/zip');
+  /** ⌘S: writes to the synced folder now; otherwise picks a folder to sync with, or downloads a .zip. */
+  const saveNow = async () => {
+    store.saveSources(wsId, current.current);
+    void history.snapshot(wsId, current.current, { force: true });
+    if (origin) return startPublish();
+    if (link) {
+      if (!link.ok) return reconnect();
+      try {
+        await writeFolder(link.handle, current.current, link.modelFile);
+        setSaved(true);
+      } catch (err) {
+        fail(err);
+      }
+    } else if (canLinkFolders) await saveToFolder();
+    else downloadZip();
+  };
+
+  // ---- Libraries -----------------------------------------------------------------------------
+  const origin = activeMeta.origin;
+  const originLibrary = origin ? listLibraries().find((l) => l.id === origin.library) : undefined;
+  const [unpublished, setUnpublished] = useState(false);
+  useEffect(() => {
+    if (!origin) return setUnpublished(false);
+    let alive = true;
+    const t = setTimeout(() => {
+      void matchesVersion(origin.path, sources, origin.modelFile, origin.version).then((same) => alive && setUnpublished(!same));
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [sources, origin]);
+
+  /** Opens an architecture: its workspace if one is already open from there, else a new local copy. */
+  const openFromLibrary = async (library: ArchLibrary, entry: ArchEntry) => {
+    try {
+      if (library.config.kind === 'browser') {
+        if (entry.path !== wsId) switchTo(entry.path);
+      } else {
+        const existing = store.listWorkspaces().find((w) => w.origin?.library === library.config.id && w.origin?.path === entry.path);
+        if (existing) {
+          if (existing.id !== wsId) switchTo(existing.id);
+        } else {
+          const loaded = await library.load(entry.path);
+          const o: Origin = { library: library.config.id, path: entry.path, modelFile: loaded.modelFile, version: loaded.version };
+          const meta = store.createWorkspace(entry.title, loaded.sources, undefined, o);
+          switchTo(meta.id, loaded.sources);
+        }
+      }
+      setScreen('editor');
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const createArchitecture = (library: LibraryConfig, title: string, folder: string, sources: WorkspaceSources) => {
+    const o: Origin | undefined = library.kind === 'browser' ? undefined : { library: library.id, path: folder, modelFile: MODEL_FILE, version: {} };
+    const meta = store.createWorkspace(title, sources, undefined, o);
+    switchTo(meta.id, sources);
+    setScreen('editor');
+    setDialog(undefined);
+  };
+
+  const publish = async (message: string, review: boolean, force: boolean) => {
+    if (!origin || !originLibrary) throw new Error('La biblioteca de esta arquitectura ya no está conectada.');
+    store.saveSources(wsId, current.current);
+    const r = await openLibrary(originLibrary).publish(origin.path, current.current, origin.modelFile, origin.version, { message, review, force, branch: origin.branch });
+    if (r.ok) {
+      store.touch(wsId, { origin: { ...origin, version: r.version, published: r.url, branch: r.branch } });
+      setWorkspaces(store.listWorkspaces());
+      setCatalogRev((n) => n + 1);
+      void history.snapshot(wsId, current.current, { name: review ? 'Publicada para revisión' : 'Publicada' });
+    }
+    return r;
+  };
+  const startPublish = () => {
+    if (!origin) return;
+    if (!originLibrary) return fail(new Error('La biblioteca de esta arquitectura ya no está conectada. Vuelve a conectarla desde el catálogo.'));
+    if (!openLibrary(originLibrary).canWrite) return fail(new Error(`«${originLibrary.name}» es de solo lectura: añade un token desde el catálogo para publicar, o descarga una copia .zip.`));
+    setDialog({ kind: 'publish' });
+  };
+
   // ---- Version history -----------------------------------------------------------------------
   const openHistory = () => {
     setHistoryOpen(true);
@@ -477,12 +602,19 @@ export function App() {
     { id: 'history', group: 'Historial', label: 'Ver historial de versiones', run: openHistory },
     { id: 'save-version', group: 'Historial', label: 'Guardar versión con nombre…', run: openHistory },
     { id: 'theme', group: 'Apariencia', label: theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro', run: () => setTheme(theme === 'dark' ? 'light' : 'dark') },
+    { id: 'editor', group: 'Editor', label: editorOpen ? 'Ocultar el editor de código' : 'Mostrar el editor de código', run: toggleEditor },
     { id: 'tab-model', group: 'Editor', label: 'Editar el modelo CALM', run: () => setTab('model') },
     { id: 'tab-view', group: 'Editor', label: 'Editar la vista actual', run: () => setTab('view') },
     ...exports.map((x) => ({ id: `export-${x.id}`, group: 'Exportar', label: `Exportar ${x.label}`, run: x.run })),
     { id: 'new-view', group: 'Vistas', label: 'Nueva vista…', run: () => setDialog({ kind: 'new-view' }) },
-    { id: 'new-ws', group: 'Workspace', label: 'Nuevo workspace…', run: () => setDialog({ kind: 'new-workspace' }) },
-    ...(canLinkFolders ? [{ id: 'open-folder', group: 'Workspace', label: 'Abrir carpeta…', run: openFolderAction }] : []),
+    { id: 'catalog', group: 'Bibliotecas', label: 'Abrir el catálogo de arquitecturas', run: () => setScreen('catalog') },
+    { id: 'connect', group: 'Bibliotecas', label: 'Conectar un repositorio Git…', run: () => setDialog({ kind: 'connect-library' }) },
+    ...(origin ? [{ id: 'publish', group: 'Bibliotecas', label: `Publicar en ${originLibrary?.name ?? 'la biblioteca'}…`, run: startPublish }] : []),
+    { id: 'new-ws', group: 'Archivo', label: 'Nuevo diagrama…', run: () => setDialog({ kind: 'new-workspace' }) },
+    { id: 'open-file', group: 'Archivo', label: `Abrir fichero… (${MOD}O)`, run: pickers.pickFiles },
+    ...(canLinkFolders ? [{ id: 'open-folder', group: 'Archivo', label: 'Abrir carpeta…', run: openFolderAction }] : []),
+    { id: 'save', group: 'Archivo', label: `Guardar (${MOD}S)`, run: () => void saveNow() },
+    { id: 'zip', group: 'Archivo', label: 'Descargar como .zip', run: downloadZip },
     ...workspaces.filter((w) => w.id !== wsId).map((w) => ({ id: `ws-${w.id}`, group: 'Workspace', label: `Abrir ${w.name}`, run: () => switchTo(w.id) })),
   ];
 
@@ -508,22 +640,46 @@ export function App() {
         <div className="brand">
           <Logo />
           <span className="brand-name">Trazo</span>
+          {pickers.inputs}
+          <button className={`menu-button${screen === 'catalog' ? ' active' : ''}`} onClick={() => setScreen(screen === 'catalog' ? 'editor' : 'catalog')} aria-pressed={screen === 'catalog'}>
+            <Grid size={14} /> Catálogo
+          </button>
+          <FileMenu
+            canLinkFolders={canLinkFolders}
+            folder={link?.handle.name}
+            pickFiles={pickers.pickFiles}
+            pickFolder={pickers.pickFolder}
+            onNew={() => setDialog({ kind: 'new-workspace' })}
+            onOpenFiles={importFiles}
+            onOpenFolder={openFolderAction}
+            onSave={() => void saveNow()}
+            onDownload={downloadZip}
+            onSaveToFolder={saveToFolder}
+            onUnlink={unlink}
+            onHistory={openHistory}
+            onCatalog={() => setScreen('catalog')}
+            publishTo={origin ? (originLibrary?.name ?? 'la biblioteca') : undefined}
+            onPublish={startPublish}
+          />
           <span className="crumb">/</span>
           <WorkspaceMenu
             workspaces={workspaces}
             active={activeMeta}
-            canLinkFolders={canLinkFolders}
-            linked={!!link}
             onSwitch={(id) => id !== wsId && switchTo(id)}
             onNew={() => setDialog({ kind: 'new-workspace' })}
-            onOpenFolder={openFolderAction}
-            onImportFiles={importFiles}
-            onSaveToFolder={saveToFolder}
-            onUnlink={unlink}
             onRename={() => setDialog({ kind: 'rename-workspace' })}
             onDelete={() => setDialog({ kind: 'delete-workspace' })}
           />
-          {link && !link.ok ? (
+          {origin ? (
+            <button
+              className={`save-state origin${unpublished ? ' unpublished' : ''}`}
+              onClick={startPublish}
+              title={unpublished ? `Hay cambios guardados en este navegador que aún no están en ${originLibrary?.name ?? 'su biblioteca'}` : `Igual que en ${originLibrary?.name ?? 'su biblioteca'}`}
+            >
+              {unpublished ? <Upload size={13} /> : <Check size={13} />}
+              <span>{unpublished ? 'Publicar' : 'Al día'}</span>
+            </button>
+          ) : link && !link.ok ? (
             <button className="save-state reconnect" onClick={reconnect} title={link.error ?? 'El navegador pide permiso de nuevo tras recargar'}>
               <Folder size={13} /> Reconectar {link.handle.name}
             </button>
@@ -562,6 +718,9 @@ export function App() {
           <button className="ghost-btn" onClick={() => setPaletteOpen(true)} title="Paleta de comandos">
             <Command size={14} /> <span className="kbd">⌘K</span>
           </button>
+          <button className={`icon-btn${editorOpen ? ' active' : ''}`} onClick={toggleEditor} title={`${editorOpen ? 'Ocultar' : 'Mostrar'} el editor de código (⌘\\)`} aria-pressed={editorOpen}>
+            <Code />
+          </button>
           <button className={`icon-btn${historyOpen ? ' active' : ''}`} onClick={() => (historyOpen ? closeHistory() : openHistory())} title="Historial de versiones" aria-pressed={historyOpen}>
             <History />
           </button>
@@ -586,8 +745,21 @@ export function App() {
         </div>
       </header>
 
-      <main className="workspace">
-        <section className="panel">
+      {screen === 'catalog' && (
+        <Catalog
+          theme={theme}
+          initial={origin?.library}
+          focus={catalogFocus}
+          revision={catalogRev}
+          onOpen={(lib, e) => void openFromLibrary(lib, e)}
+          onNew={(library) => setDialog({ kind: 'new-architecture', library })}
+          onConnect={() => setDialog({ kind: 'connect-library' })}
+          onEdit={(l) => l.kind !== 'browser' && setDialog({ kind: 'connect-library', editing: l })}
+          onClose={() => setScreen('editor')}
+        />
+      )}
+      <main className={`workspace${editorOpen ? '' : ' no-editor'}`} hidden={screen === 'catalog'}>
+        {editorOpen && <section className="panel">
           <div className="panel-tabs">
             <button className={tab === 'model' ? 'active' : ''} onClick={() => setTab('model')}>
               {link?.modelFile ?? MODEL_FILE}
@@ -596,6 +768,7 @@ export function App() {
               {viewId}.view.yaml
             </button>
             <span className="grow" />
+            <button className="icon-btn small" title="Ocultar el editor (⌘\\)" onClick={toggleEditor}><PanelLeft size={15} /></button>
           </div>
           <div className="editor">
             <CodeMirror
@@ -629,7 +802,7 @@ export function App() {
               </ul>
             )}
           </footer>
-        </section>
+        </section>}
 
         <section className="stage" ref={stage}>
           <Canvas
@@ -861,6 +1034,35 @@ export function App() {
             commit({ ...sources, views });
             setDialog(undefined);
           }}
+        />
+      )}
+      {dialog?.kind === 'connect-library' && (
+        <ConnectLibraryDialog
+          editing={dialog.editing}
+          onClose={() => setDialog(undefined)}
+          onDone={(config) => {
+            setDialog(undefined);
+            setCatalogFocus(config.id);
+            setCatalogRev((n) => n + 1);
+          }}
+        />
+      )}
+      {dialog?.kind === 'new-architecture' && (
+        <NewArchitectureDialog
+          library={dialog.library}
+          onClose={() => setDialog(undefined)}
+          onCreate={(title, folder, t) => createArchitecture(dialog.library, title, folder, t.sources)}
+        />
+      )}
+      {dialog?.kind === 'publish' && origin && originLibrary && originLibrary.kind !== 'browser' && (
+        <PublishDialog
+          library={originLibrary}
+          path={origin.path}
+          title={activeMeta.name}
+          isNew={!Object.keys(origin.version).length}
+          openReview={origin.branch ? origin.published : undefined}
+          onPublish={publish}
+          onClose={() => setDialog(undefined)}
         />
       )}
       {dialog?.kind === 'error' && <ErrorDialog message={dialog.message} onClose={() => setDialog(undefined)} />}

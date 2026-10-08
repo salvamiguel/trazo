@@ -3,6 +3,7 @@
  * linked to a folder on disk also writes there (see folder.ts).
  */
 import type { WorkspaceSources } from '@trazo/core';
+import type { Origin } from './storage/types.ts';
 import { EXAMPLE, EXAMPLE_NAME } from './example.ts';
 
 export interface WorkspaceMeta {
@@ -11,6 +12,8 @@ export interface WorkspaceMeta {
   updated: number;
   /** Name of the linked folder, when the workspace lives on disk. */
   folder?: string;
+  /** Library architecture the workspace was opened from; saving publishes back there. */
+  origin?: Origin;
 }
 
 const INDEX = 'trazo.workspaces.v2';
@@ -71,8 +74,8 @@ export function touch(id: string, patch: Partial<WorkspaceMeta>) {
   write(INDEX, index.map((m) => (m.id === id ? { ...m, ...patch, updated: Date.now() } : m)));
 }
 
-export function createWorkspace(name: string, sources: WorkspaceSources, folder?: string): WorkspaceMeta {
-  const meta: WorkspaceMeta = { id: newId(), name, updated: Date.now(), ...(folder ? { folder } : {}) };
+export function createWorkspace(name: string, sources: WorkspaceSources, folder?: string, origin?: Origin): WorkspaceMeta {
+  const meta: WorkspaceMeta = { id: newId(), name, updated: Date.now(), ...(folder ? { folder } : {}), ...(origin ? { origin } : {}) };
   write(key(meta.id), sources);
   write(INDEX, [...(read<WorkspaceMeta[]>(INDEX) ?? []), meta]);
   return meta;
