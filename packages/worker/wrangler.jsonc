@@ -1,0 +1,18 @@
+// Trazo API on Cloudflare Workers. Deployed by .github/workflows/worker.yml; setup in docs/backend-cloudflare.md.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "trazo-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // Plain settings. The deploy workflow overrides them with the repository variables
+  // TRAZO_ALLOWED_ORIGINS, TRAZO_GH_CLIENT_ID, TRAZO_GH_APP_ID and TRAZO_GALLERY_REPOS when they are set.
+  // Secrets (GH_CLIENT_SECRET, GH_APP_PRIVATE_KEY) are set once with `wrangler secret put` and survive deploys.
+  "vars": {
+    "ALLOWED_ORIGINS": "https://salvamiguel.github.io,http://localhost:5173",
+    "GH_CLIENT_ID": "",
+    "GH_APP_ID": "",
+    "GALLERY_REPOS": ""
+  }
+}
