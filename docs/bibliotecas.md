@@ -48,6 +48,8 @@ Los repositorios públicos se pueden ver sin token, en solo lectura. Para reposi
 
 El token se guarda solo en el navegador de quien lo usa (`localStorage`) y viaja únicamente a la API de su proveedor.
 
+En github.com también se puede pulsar **Iniciar sesión con GitHub** en el catálogo, sin crear ningún token. Usa la GitHub App de Trazo, que el administrador de la organización instala en los repos de biblioteca. Hace falta tener desplegado el Worker de [backend-cloudflare.md](backend-cloudflare.md). Un token pegado en una biblioteca tiene prioridad sobre la sesión.
+
 ## Editar y publicar
 
 Abrir una arquitectura del catálogo la copia a un workspace local, que se guarda solo mientras editas. Publicar la sube al repositorio de una de estas dos formas:

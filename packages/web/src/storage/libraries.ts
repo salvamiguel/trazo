@@ -4,7 +4,8 @@
  */
 import * as store from '../workspaces.ts';
 import { GitLibrary } from './git.ts';
-import { GitHubHost } from './github.ts';
+import { githubSession, githubToken } from './github-auth.ts';
+import { GitHubHost, type TokenSource } from './github.ts';
 import { GitLabHost } from './gitlab.ts';
 import { architectureMeta } from './meta.ts';
 import type { CatalogEntry, Library, LibraryConfig, Loaded } from './types.ts';
@@ -91,10 +92,13 @@ export function openLibrary(config: LibraryConfig, opts: { token?: string; fetch
   if (config.kind === 'browser') return new BrowserLibrary();
   const trial = opts.token !== undefined || !!opts.fetcher;
   const token = opts.token ?? read<string>(tokenKey(config.id));
-  const key = JSON.stringify([config, token]);
+  // github.com libraries without a token of their own use the "Iniciar sesión con GitHub" session.
+  const session = !token && config.kind === 'github' && !config.api ? githubSession() : undefined;
+  const key = JSON.stringify([config, token, session?.user?.login ?? (session ? 'session' : null)]);
   const hit = cache.get(config.id);
   if (hit && hit.key === key && !trial) return hit.library;
-  const host = config.kind === 'github' ? new GitHubHost(config, token, opts.fetcher) : new GitLabHost(config, token, opts.fetcher);
+  const source: TokenSource = token || (session ? () => githubToken() : undefined);
+  const host = config.kind === 'github' ? new GitHubHost(config, source, opts.fetcher) : new GitLabHost(config, token, opts.fetcher);
   const library = new GitLibrary(host);
   if (!trial) cache.set(config.id, { key, library });
   return library;

@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { layoutModelView, parseWorkspace, renderSvg, type ThemeName, type WorkspaceSources } from '@trazo/core';
 import { IconGlyph } from './IconGlyph.tsx';
 import { Close, Dots, Plus, Reset, Search } from './icons.tsx';
+import { authApi, githubSession, logoutGitHub, onSessionChange, startGitHubLogin } from './storage/github-auth.ts';
 import { listLibraries, openLibrary, removeLibrary } from './storage/libraries.ts';
 import type { CatalogEntry, Library, LibraryConfig } from './storage/types.ts';
 
@@ -88,7 +89,10 @@ export function Catalog({ theme, initial, focus, revision, onOpen, onNew, onConn
   const [libraries, setLibraries] = useState(() => listLibraries());
   const [selected, setSelected] = useState(() => (libraries.some((l) => l.id === initial) ? initial! : libraries[0]!.id));
   const config = libraries.find((l) => l.id === selected) ?? libraries[0]!;
-  const library = useMemo(() => openLibrary(config), [config]);
+  const [session, setSession] = useState(() => githubSession());
+  useEffect(() => onSessionChange(() => setSession(githubSession())), []);
+  // Logging in or out changes which token a github.com library uses.
+  const library = useMemo(() => openLibrary(config), [config, session?.accessToken]);
   const [state, setState] = useState<{ entries?: CatalogEntry[]; error?: string; loading: boolean }>({ loading: true });
   const [query, setQuery] = useState('');
   const [facet, setFacet] = useState<string>();
@@ -175,6 +179,24 @@ export function Catalog({ theme, initial, focus, revision, onOpen, onNew, onConn
           ))}
         </nav>
         <button className="lib-connect" onClick={onConnect}><Plus size={14} /> Conectar repositorio Git…</button>
+        {authApi() && (
+          <div className="gh-account">
+            {session ? (
+              <>
+                {session.user && <img src={session.user.avatarUrl} alt="" width={22} height={22} />}
+                <span className="gh-account-text">
+                  <b>{session.user ? `@${session.user.login}` : 'GitHub'}</b>
+                  <small>Sesión de GitHub en este navegador</small>
+                </span>
+                <button className="gh-logout" onClick={() => void logoutGitHub()}>Salir</button>
+              </>
+            ) : (
+              <button className="gh-login" onClick={startGitHubLogin}>
+                <IconGlyph icon="logos:github-icon" size={16} /> Iniciar sesión con GitHub
+              </button>
+            )}
+          </div>
+        )}
         <p className="catalog-note">Conecta el repositorio de arquitecturas de tu empresa o equipo, en GitHub o GitLab, público o privado.</p>
       </aside>
 
@@ -191,7 +213,7 @@ export function Catalog({ theme, initial, focus, revision, onOpen, onNew, onConn
             {config.kind !== 'browser' && (
               <button className="icon-btn" title="Actualizar" onClick={() => setReload((r) => r + 1)}><Reset size={16} /></button>
             )}
-            <button className="primary-btn" onClick={() => onNew(config)} disabled={config.kind !== 'browser' && !library.canWrite} title={config.kind !== 'browser' && !library.canWrite ? 'Añade un token para crear arquitecturas aquí' : undefined}>
+            <button className="primary-btn" onClick={() => onNew(config)} disabled={config.kind !== 'browser' && !library.canWrite} title={config.kind !== 'browser' && !library.canWrite ? (authApi() && config.kind === 'github' ? 'Inicia sesión con GitHub o añade un token para crear arquitecturas aquí' : 'Añade un token para crear arquitecturas aquí') : undefined}>
               <Plus size={15} /> Nueva arquitectura
             </button>
             <button className="icon-btn" title="Volver al editor (Esc)" onClick={onClose}><Close size={16} /></button>

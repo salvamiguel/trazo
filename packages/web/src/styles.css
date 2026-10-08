@@ -436,6 +436,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .lib-row.active .lib-text b { color: var(--accent); }
 .lib-connect { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 9px 10px; border: 1px dashed var(--border); border-radius: 9px; background: none; color: var(--muted); font: inherit; font-size: 13px; }
 .lib-connect:hover { border-color: var(--accent); color: var(--accent); }
+.gh-account { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; }
+.gh-account img { border-radius: 50%; flex: none; }
+.gh-account-text { display: grid; flex: 1; min-width: 0; }
+.gh-account-text b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.gh-account-text small { color: var(--faint); font-size: 11px; }
+.gh-account:has(.gh-login) { padding: 0; border: 0; }
+.gh-login { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--fg); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.gh-login:hover { border-color: var(--accent); }
+.gh-logout { padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.gh-logout:hover { color: var(--fg); background: var(--bg); }
 .catalog-note { margin: 4px 6px; color: var(--faint); font-size: 12px; line-height: 1.45; }
 .catalog-main { min-width: 0; overflow: auto; padding: 24px 28px 40px; }
 .catalog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

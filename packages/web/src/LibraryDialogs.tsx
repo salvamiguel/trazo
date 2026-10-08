@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Modal, useAutofocus } from './Dialogs.tsx';
+import { authApi, githubSession } from './storage/github-auth.ts';
 import { hasToken, newLibraryId, openLibrary, parseRepoUrl, saveLibrary } from './storage/libraries.ts';
 import type { LibraryConfig, PublishResult } from './storage/types.ts';
 import { TEMPLATES, type Template } from './templates.ts';
@@ -84,7 +85,7 @@ export function ConnectLibraryDialog({ editing, onDone, onClose }: { editing?: G
           <small className="field-help">
             {parsed.kind === 'gitlab'
               ? 'Hace falta para repositorios privados y para publicar cambios: un token personal o de proyecto con el alcance «api».'
-              : 'Hace falta para repositorios privados y para publicar cambios: un token fine-grained con permiso de lectura y escritura en «Contents» y «Pull requests».'}{' '}
+              : githubLogin(parsed.api)}{' '}
             Se guarda solo en este navegador.
           </small>
         </label>
@@ -96,6 +97,15 @@ export function ConnectLibraryDialog({ editing, onDone, onClose }: { editing?: G
       </form>
     </Modal>
   );
+}
+
+/** Token help for GitHub: with the Trazo API deployed, the GitHub session makes the token optional. */
+function githubLogin(enterprise: string | undefined): string {
+  const pat = 'un token fine-grained con permiso de lectura y escritura en «Contents» y «Pull requests».';
+  if (!authApi() || enterprise) return `Hace falta para repositorios privados y para publicar cambios: ${pat}`;
+  const s = githubSession();
+  if (s) return `Opcional: sin token se usa tu sesión de GitHub${s.user ? ` (@${s.user.login})` : ''}. Si pones uno, debe ser ${pat}`;
+  return `Para repositorios privados y para publicar, inicia sesión con GitHub desde el catálogo o pega ${pat}`;
 }
 
 /** Creates an architecture in a library: a title, a starting template, and the folder it will live in. */

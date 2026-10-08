@@ -26,18 +26,18 @@ Las llamadas desde el navegador solo se aceptan desde los orígenes de `ALLOWED_
 
 ### Cómo recibe la app la sesión
 
-La app navega a `/auth/github/login?return_to=<url actual>`. Al volver, el Worker:
+El botón **Iniciar sesión con GitHub** del catálogo lleva la página a `/auth/github/login?return_to=<url actual>`. Al volver, el Worker:
 
 - si el login se abrió en una ventana emergente, hace `window.opener.postMessage({ type: 'trazo:github-auth', session }, <origen de la app>)` y cierra la ventana;
-- si no, redirige a `return_to#trazo-auth=<JSON>`. El fragmento `#` nunca llega a ningún servidor; la app lo lee, lo borra con `history.replaceState` y guarda la sesión.
+- si no, redirige a `return_to#trazo-auth=<JSON>`. El fragmento `#` nunca llega a ningún servidor.
 
 `session` es `{ accessToken, expiresAt, refreshToken, refreshTokenExpiresAt, user: { login, name, avatarUrl } }`, con fechas en milisegundos. Si algo falla llega `{ type: 'trazo:github-auth', error: '<código>' }`.
 
-Recomiendo la redirección de página completa como opción por defecto: GitHub puede cortar la relación con la ventana emergente y la app ya guarda el trabajo en el navegador, así que no se pierde nada. La app debe renovar el token un poco antes de `expiresAt` con `/auth/github/refresh`.
+La app usa la redirección de página completa (el trabajo ya se guarda en el navegador, así que no se pierde nada). Al cargar, `packages/web/src/storage/github-auth.ts` lee el fragmento, guarda la sesión en `localStorage`, limpia la URL y abre el catálogo. Las bibliotecas de github.com sin token propio usan esa sesión, y el token se renueva solo con `/auth/github/refresh` cinco minutos antes de caducar. «Salir» revoca el token.
 
 ## Puesta en marcha
 
-Necesitas hacerlo una sola vez. Los pasos 1 a 3 dejan el despliegue automático funcionando; los pasos 4 a 6 activan el login y la galería.
+Necesitas hacerlo una sola vez. Los pasos 1 a 3 dejan el despliegue automático funcionando; los pasos 4 a 7 activan el login y la galería.
 
 ### 1. Token de Cloudflare con el mínimo permiso
 
@@ -125,6 +125,12 @@ En **Settings → Secrets and variables → Actions → Variables** (no son secr
 | `TRAZO_GALLERY_REPOS` | Repos de la galería, por ejemplo `salvamiguel/trazo`. Vacío desactiva la galería. | Para la galería |
 
 Vuelve a lanzar el workflow. `…/health` debería decir `"oauth": true` (y `"gallery": true` si configuraste la galería).
+
+### 7. Conectar la app con el Worker
+
+Añade una variable más del repo, `TRAZO_API_URL`, con la URL del Worker (`https://trazo-api.<tu-subdominio>.workers.dev`, sin barra final). El workflow de GitHub Pages la pasa a la build como `VITE_TRAZO_API`. Lanza **Actions → GitHub Pages → Run workflow**, o haz un push a main: el botón **Iniciar sesión con GitHub** aparece en el catálogo. Sin esa variable el botón no se muestra y todo sigue funcionando con tokens.
+
+En local: `VITE_TRAZO_API=http://localhost:8787 pnpm dev`, con el Worker arrancado en otra terminal.
 
 Las variables normales se fijan en cada despliegue: si las cambias en el panel de Cloudflare, el siguiente despliegue las sobrescribe. Cámbialas aquí.
 

@@ -4,6 +4,9 @@ import { LibraryError, type LibraryConfig } from './types.ts';
 
 type Config = LibraryConfig & { kind: 'github' };
 
+/** A personal token, or the signed-in GitHub session (whose token is renewed on the way). */
+export type TokenSource = string | (() => Promise<string | undefined>) | undefined;
+
 const decodeBase64 = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0)));
 
 export class GitHubHost implements GitHost {
@@ -12,7 +15,7 @@ export class GitHubHost implements GitHost {
 
   constructor(
     readonly config: Config,
-    private token: string | undefined,
+    private token: TokenSource,
     private fetcher: typeof fetch = (...a) => fetch(...a),
   ) {
     this.api = (config.api || 'https://api.github.com').replace(/\/+$/, '');
@@ -26,19 +29,20 @@ export class GitHubHost implements GitHost {
   private repo = () => `/repos/${encodeURIComponent(this.config.owner)}/${encodeURIComponent(this.config.repo)}`;
 
   private async call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+    const token = typeof this.token === 'function' ? await this.token() : this.token;
     const res = await this.fetcher(`${this.api}${path}`, {
       method: init.method ?? 'GET',
       headers: {
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
-        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init.body ? { 'Content-Type': 'application/json' } : {}),
       },
       body: init.body ? JSON.stringify(init.body) : undefined,
     });
     if (!res.ok) {
       const detail = await res.json().then((j: { message?: string }) => j.message).catch(() => undefined);
-      throw new LibraryError(githubMessage(res.status, detail, `${this.config.owner}/${this.config.repo}`, !!this.token), res.status);
+      throw new LibraryError(githubMessage(res.status, detail, `${this.config.owner}/${this.config.repo}`, !!token), res.status);
     }
     return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
   }

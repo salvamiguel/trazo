@@ -47,6 +47,7 @@ import { WorkspaceMenu } from './WorkspaceMenu.tsx';
 import { FileMenu, MOD, useFilePickers } from './FileMenu.tsx';
 import { writeZip } from './zip.ts';
 import { Catalog } from './Catalog.tsx';
+import { authApi, consumeLoginResult, loginErrorMessage } from './storage/github-auth.ts';
 import { ConnectLibraryDialog, NewArchitectureDialog, PublishDialog } from './LibraryDialogs.tsx';
 import { matchesVersion } from './storage/git.ts';
 import { listLibraries, openLibrary } from './storage/libraries.ts';
@@ -383,6 +384,15 @@ export function App() {
   // ---- Workspaces and folders ----------------------------------------------------------------
   const fail = (err: unknown) => setDialog({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
 
+  // Back from "Iniciar sesión con GitHub": land on the catalog, where the libraries now open with the session.
+  useEffect(() => {
+    const result = consumeLoginResult();
+    if (!result) return;
+    setScreen('catalog');
+    setCatalogRev((n) => n + 1);
+    if (result.error) fail(new Error(loginErrorMessage(result.error)));
+  }, []);
+
   const switchTo = (id: string, next?: WorkspaceSources) => {
     const loaded = next ?? store.loadSources(id);
     if (!loaded) return;
@@ -540,7 +550,10 @@ export function App() {
   const startPublish = () => {
     if (!origin) return;
     if (!originLibrary) return fail(new Error('La biblioteca de esta arquitectura ya no está conectada. Vuelve a conectarla desde el catálogo.'));
-    if (!openLibrary(originLibrary).canWrite) return fail(new Error(`«${originLibrary.name}» es de solo lectura: añade un token desde el catálogo para publicar, o descarga una copia .zip.`));
+    if (!openLibrary(originLibrary).canWrite) {
+      const how = originLibrary.kind === 'github' && !originLibrary.api && authApi() ? 'inicia sesión con GitHub o añade un token desde el catálogo' : 'añade un token desde el catálogo';
+      return fail(new Error(`«${originLibrary.name}» es de solo lectura: ${how} para publicar, o descarga una copia .zip.`));
+    }
     setDialog({ kind: 'publish' });
   };
 
