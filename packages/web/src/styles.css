@@ -444,6 +444,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .gh-account:has(.gh-login) { padding: 0; border: 0; }
 .gh-login { display: flex; flex: 1; align-items: center; justify-content: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); color: var(--fg); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .gh-login:hover { border-color: var(--accent); }
+/* The GitHub mark is drawn in fixed near-black; paint it with the text colour so it shows in both themes. */
+.gh-login svg [fill] { fill: currentColor; }
 .gh-logout { padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
 .gh-logout:hover { color: var(--fg); background: var(--bg); }
 .catalog-note { margin: 4px 6px; color: var(--faint); font-size: 12px; line-height: 1.45; }
