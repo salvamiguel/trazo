@@ -130,3 +130,47 @@ export function loginErrorMessage(code: string): string {
   if (code === 'bad_verification_code') return 'GitHub rechazó el código de inicio de sesión (caducado o ya usado). Vuelve a intentarlo.';
   return `No se pudo iniciar sesión con GitHub (${code}).`;
 }
+
+export interface InstalledRepo {
+  owner: string;
+  repo: string;
+  fullName: string;
+  private: boolean;
+  description: string | null;
+}
+
+export interface InstalledRepos {
+  repos: InstalledRepo[];
+  /** Where to add or remove repositories of each installation (github.com settings pages). */
+  configureUrls: string[];
+}
+
+/**
+ * Repositories the signed-in person can reach through the Trazo GitHub App: those of every
+ * installation they have access to. Picking one fills in the library connection.
+ */
+export async function installedRepos(fetcher: typeof fetch = (...a) => fetch(...a)): Promise<InstalledRepos> {
+  const token = await githubToken(fetcher);
+  if (!token) throw new Error('Inicia sesión con GitHub para ver tus repositorios.');
+  const get = async <T>(path: string): Promise<T> => {
+    const res = await fetcher(`https://api.github.com${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    });
+    if (!res.ok) throw new Error(`GitHub respondió ${res.status} al listar tus repositorios.`);
+    return (await res.json()) as T;
+  };
+  const { installations } = await get<{ installations: Array<{ id: number; html_url: string }> }>('/user/installations?per_page=100');
+  const repos: InstalledRepo[] = [];
+  for (const inst of installations) {
+    // A few pages are plenty for a list people scroll through; search narrows it anyway.
+    for (let page = 1; page <= 5; page++) {
+      const r = await get<{ repositories: Array<{ name: string; full_name: string; private: boolean; description: string | null; owner: { login: string } }> }>(
+        `/user/installations/${inst.id}/repositories?per_page=100&page=${page}`,
+      );
+      for (const x of r.repositories) repos.push({ owner: x.owner.login, repo: x.name, fullName: x.full_name, private: x.private, description: x.description });
+      if (r.repositories.length < 100) break;
+    }
+  }
+  repos.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  return { repos, configureUrls: installations.map((i) => i.html_url) };
+}
