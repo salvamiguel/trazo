@@ -1,0 +1,7 @@
+# Copy to .dev.vars for `pnpm --filter @trazo/worker dev` (never commit .dev.vars).
+GH_CLIENT_ID=Iv23li...
+GH_CLIENT_SECRET=...
+# Only for the gallery:
+# GH_APP_ID=123456
+# GH_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+# GALLERY_REPOS=salvamiguel/trazo

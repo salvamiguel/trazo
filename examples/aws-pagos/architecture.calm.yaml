@@ -1,6 +1,14 @@
 # Plataforma de pagos en AWS: ejemplo de workspace Trazo.
 # El fichero es CALM 1.2 válido; lo específico de Trazo vive en metadata.trazo.
 $schema: https://calm.finos.org/release/1.2/meta/calm.json
+metadata:
+  trazo:
+    title: Plataforma de pagos
+    description: Cobros con tarjeta en AWS, con scoring de fraude con IA y conciliación diaria.
+    owner: Equipo Pagos
+    domain: Pagos
+    status: Producción
+    tags: [aws, eks, ia]
 
 nodes:
   # --- Actores y sistemas externos ---

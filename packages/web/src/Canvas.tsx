@@ -110,6 +110,26 @@ export function Canvas(props: Props) {
     }
   }, [layout, fitKey, fit]);
 
+  // When the canvas changes size (editor shown or hidden, window resized), refit an untouched
+  // diagram, or keep a panned one where it was relative to the centre.
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+  useEffect(() => {
+    const el = host.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let last = el.getBoundingClientRect();
+    const ro = new ResizeObserver(() => {
+      const box = el.getBoundingClientRect();
+      const dx = (box.width - last.width) / 2, dy = (box.height - last.height) / 2;
+      last = box;
+      if (!dx && !dy) return;
+      if (userMoved.current) setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      else fitRef.current();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     const el = host.current;
     if (!el) return;

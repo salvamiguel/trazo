@@ -1,0 +1,70 @@
+name: Worker (Cloudflare)
+
+# Tests the Trazo API Worker on every PR that touches it and deploys it to Cloudflare on main.
+# One-time setup (Cloudflare token, GitHub App, secrets): docs/backend-cloudflare.md
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/worker/**', '.github/workflows/worker.yml', 'pnpm-lock.yaml']
+  pull_request:
+    paths: ['packages/worker/**', '.github/workflows/worker.yml', 'pnpm-lock.yaml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @trazo/worker typecheck
+      - run: pnpm --filter @trazo/worker test
+      # Bundles exactly what would be uploaded, without touching Cloudflare.
+      - run: pnpm --filter @trazo/worker check
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    # The Cloudflare secrets live in this environment, so only main can read them.
+    environment: cloudflare
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Deploy
+        working-directory: packages/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ALLOWED_ORIGINS: ${{ vars.TRAZO_ALLOWED_ORIGINS }}
+          GH_CLIENT_ID: ${{ vars.TRAZO_GH_CLIENT_ID }}
+          GH_APP_ID: ${{ vars.TRAZO_GH_APP_ID }}
+          GALLERY_REPOS: ${{ vars.TRAZO_GALLERY_REPOS }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::warning::Sin CLOUDFLARE_API_TOKEN en el entorno cloudflare: no se despliega (ver docs/backend-cloudflare.md)."
+            exit 0
+          fi
+          # Repository variables override wrangler.jsonc only when they are set.
+          args=()
+          for name in ALLOWED_ORIGINS GH_CLIENT_ID GH_APP_ID GALLERY_REPOS; do
+            if [ -n "${!name}" ]; then args+=(--var "$name:${!name}"); fi
+          done
+          pnpm exec wrangler deploy "${args[@]}"

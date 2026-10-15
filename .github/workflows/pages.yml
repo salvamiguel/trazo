@@ -29,6 +29,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build:pages
+        env:
+          # URL of the Trazo API Worker; empty hides "Iniciar sesión con GitHub" (docs/backend-cloudflare.md).
+          VITE_TRAZO_API: ${{ vars.TRAZO_API_URL }}
       - uses: actions/configure-pages@v6
         if: github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v5

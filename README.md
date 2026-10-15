@@ -66,6 +66,7 @@ Un nodo CALM que contiene a otros (`deployed-in` o `composed-of`) se dibuja como
 | `packages/core/src/render` | SVG con temas claro y oscuro |
 | `packages/core/src/export` | `.drawio` con contenedores y waypoints |
 | `packages/core/src/icons` | Iconos (Iconify `logos` y `tabler` en el spike) |
+| `packages/worker` | Backend mínimo en Cloudflare Workers: login con GitHub y galería pública. Puesta en marcha en [docs/backend-cloudflare.md](docs/backend-cloudflare.md) |
 
 ## Licencias de terceros
 
