@@ -159,7 +159,8 @@ async function exchange(env: Env & { GH_CLIENT_ID: string; GH_CLIENT_SECRET: str
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
-    body: new URLSearchParams({ client_id: env.GH_CLIENT_ID, client_secret: env.GH_CLIENT_SECRET, ...params }),
+    // Trimmed: a newline pasted along with the secret in the dashboard makes GitHub answer incorrect_client_credentials.
+    body: new URLSearchParams({ client_id: env.GH_CLIENT_ID.trim(), client_secret: env.GH_CLIENT_SECRET.trim(), ...params }),
   });
   // GitHub answers 200 with an `error` field for bad codes and expired refresh tokens.
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;

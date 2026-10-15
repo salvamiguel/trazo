@@ -10,7 +10,7 @@ const BASE = 'https://trazo-api.example.workers.dev';
 const env = (over: Partial<Env> = {}): Env => ({
   ALLOWED_ORIGINS: `${APP},http://localhost:5173`,
   GH_CLIENT_ID: 'Iv23client',
-  GH_CLIENT_SECRET: 'shh',
+  GH_CLIENT_SECRET: 'shh\n',
   ...over,
 });
 

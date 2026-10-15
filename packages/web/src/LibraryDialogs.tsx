@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, useAutofocus } from './Dialogs.tsx';
-import { authApi, githubSession } from './storage/github-auth.ts';
+import { authApi, githubSession, installedRepos, type InstalledRepos } from './storage/github-auth.ts';
 import { hasToken, newLibraryId, openLibrary, parseRepoUrl, saveLibrary } from './storage/libraries.ts';
 import type { LibraryConfig, PublishResult } from './storage/types.ts';
 import { TEMPLATES, type Template } from './templates.ts';
@@ -61,8 +61,14 @@ export function ConnectLibraryDialog({ editing, onDone, onClose }: { editing?: G
         <p className="modal-text">
           Una biblioteca es un repositorio Git con el catálogo de arquitecturas de tu empresa o equipo. Cada carpeta con un <code>*.calm.yaml</code> es una arquitectura.
         </p>
+        {!editing && authApi() && githubSession() && (
+          <RepoPicker
+            selected={parsed.kind === 'github' && !parsed.api ? `${parsed.owner}/${parsed.repo}` : undefined}
+            onPick={(fullName) => onUrl(`https://github.com/${fullName}`)}
+          />
+        )}
         <label className="field">
-          <span>Repositorio {kindLabel && <em className="field-hint">· {kindLabel}</em>}</span>
+          <span>{!editing && authApi() && githubSession() ? 'O pega la URL de cualquier repositorio' : 'Repositorio'} {kindLabel && <em className="field-hint">· {kindLabel}</em>}</span>
           <input ref={input} value={url} placeholder="https://github.com/empresa/arquitecturas" onChange={(e) => onUrl(e.target.value)} />
         </label>
         <div className="field-row">
@@ -79,16 +85,30 @@ export function ConnectLibraryDialog({ editing, onDone, onClose }: { editing?: G
           <span>Carpeta</span>
           <input value={root} placeholder="todo el repositorio" onChange={(e) => setRoot(e.target.value)} />
         </label>
-        <label className="field">
-          <span>Token de acceso {editing && hasToken(editing.id) && <em className="field-hint">· guardado; escribe otro para cambiarlo</em>}</span>
-          <input type="password" autoComplete="off" value={token} placeholder={parsed.kind === 'gitlab' ? 'glpat-…' : 'github_pat_…'} onChange={(e) => setToken(e.target.value)} />
-          <small className="field-help">
-            {parsed.kind === 'gitlab'
-              ? 'Hace falta para repositorios privados y para publicar cambios: un token personal o de proyecto con el alcance «api».'
-              : githubLogin(parsed.api)}{' '}
-            Se guarda solo en este navegador.
-          </small>
-        </label>
+        {(() => {
+          const field = (
+            <label className="field">
+              <span>Token de acceso {editing && hasToken(editing.id) && <em className="field-hint">· guardado; escribe otro para cambiarlo</em>}</span>
+              <input type="password" autoComplete="off" value={token} placeholder={parsed.kind === 'gitlab' ? 'glpat-…' : 'github_pat_…'} onChange={(e) => setToken(e.target.value)} />
+              <small className="field-help">
+                {parsed.kind === 'gitlab'
+                  ? 'Hace falta para repositorios privados y para publicar cambios: un token personal o de proyecto con el alcance «api».'
+                  : githubLogin(parsed.api)}{' '}
+                Se guarda solo en este navegador.
+              </small>
+            </label>
+          );
+          // Signed in with GitHub, a github.com library needs no token: keep the field out of the way.
+          const viaSession = !editing && parsed.kind === 'github' && !parsed.api && !!authApi() && !!githubSession();
+          return viaSession ? (
+            <details className="token-more">
+              <summary>Usar un token en lugar de tu sesión</summary>
+              {field}
+            </details>
+          ) : (
+            field
+          );
+        })()}
         {error && <p className="form-error">{error}</p>}
         <footer>
           <button type="button" className="ghost-btn" onClick={onClose}>Cancelar</button>
@@ -96,6 +116,68 @@ export function ConnectLibraryDialog({ editing, onDone, onClose }: { editing?: G
         </footer>
       </form>
     </Modal>
+  );
+}
+
+/** The repositories the signed-in person reaches through the Trazo GitHub App, to pick one instead of pasting a URL. */
+function RepoPicker({ selected, onPick }: { selected?: string; onPick: (fullName: string) => void }) {
+  const [data, setData] = useState<InstalledRepos>();
+  const [error, setError] = useState<string>();
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    let alive = true;
+    installedRepos()
+      .then((d) => alive && setData(d))
+      .catch((err: unknown) => alive && setError(err instanceof Error ? err.message : String(err)));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (data?.repos ?? []).filter((r) => !q || r.fullName.toLowerCase().includes(q) || (r.description ?? '').toLowerCase().includes(q));
+  }, [data, query]);
+  const user = githubSession()?.user?.login;
+
+  return (
+    <div className="field">
+      <span>Tus repositorios en GitHub {user && <em className="field-hint">· @{user}</em>}</span>
+      {error ? (
+        <p className="form-error">{error}</p>
+      ) : !data ? (
+        <p className="field-help">Cargando tus repositorios…</p>
+      ) : data.repos.length === 0 ? (
+        <p className="field-help">
+          La GitHub App de Trazo aún no tiene acceso a ningún repositorio tuyo. Instálala en los repos que quieras usar como biblioteca
+          {data.configureUrls[0] ? <> (<a href={data.configureUrls[0]} target="_blank" rel="noreferrer">configurar la instalación</a>)</> : <> desde la página de la App en GitHub</>}
+          {' '}y vuelve a abrir este diálogo.
+        </p>
+      ) : (
+        <>
+          {data.repos.length > 6 && <input value={query} placeholder="Buscar repositorio…" onChange={(e) => setQuery(e.target.value)} />}
+          <div className="repo-list" role="listbox" aria-label="Repositorios">
+            {shown.map((r) => (
+              <button
+                type="button"
+                key={r.fullName}
+                role="option"
+                aria-selected={selected?.toLowerCase() === r.fullName.toLowerCase()}
+                className={`repo-item${selected?.toLowerCase() === r.fullName.toLowerCase() ? ' active' : ''}`}
+                onClick={() => onPick(r.fullName)}
+              >
+                <b>{r.fullName}</b>
+                {r.private && <span className="pill">Privado</span>}
+                {r.description && <small>{r.description}</small>}
+              </button>
+            ))}
+            {shown.length === 0 && <p className="field-help">Ningún repositorio coincide.</p>}
+          </div>
+          <small className="field-help">
+            ¿Falta alguno? {data.configureUrls[0] ? <a href={data.configureUrls[0]} target="_blank" rel="noreferrer">Dale acceso a la App</a> : 'Dale acceso a la App'} y vuelve a abrir este diálogo.
+          </small>
+        </>
+      )}
+    </div>
   );
 }
 

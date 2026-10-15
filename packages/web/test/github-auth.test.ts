@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { consumeLoginResult, githubSession, githubToken, logoutGitHub, type GitHubSession } from '../src/storage/github-auth.ts';
+import { consumeLoginResult, githubSession, githubToken, installedRepos, logoutGitHub, type GitHubSession } from '../src/storage/github-auth.ts';
 import { openLibrary } from '../src/storage/libraries.ts';
 
 const API = 'https://trazo-api.example.workers.dev';
@@ -98,5 +98,26 @@ describe('GitHub login through the Trazo API', () => {
     // Enterprise servers are not covered by the github.com App.
     const ghes = openLibrary({ id: 'l2', kind: 'github', name: 'Arq', owner: 'acme', repo: 'arq', api: 'https://ghe.example/api/v3' }, { fetcher });
     expect(ghes.canWrite).toBe(false);
+  });
+
+  it('lists the repositories of every installation the person can reach', async () => {
+    fakeBrowser();
+    store(session({ expiresAt: null }));
+    const seen: string[] = [];
+    const fetcher = (async (url: string, init?: RequestInit) => {
+      seen.push(`${url} ${new Headers(init?.headers).get('Authorization')}`);
+      const path = new URL(url).pathname;
+      if (path === '/user/installations') return new Response(JSON.stringify({ installations: [{ id: 7, html_url: 'https://github.com/settings/installations/7' }] }));
+      if (path === '/user/installations/7/repositories')
+        return new Response(JSON.stringify({ repositories: [
+          { name: 'trazo', full_name: 'salvamiguel/trazo', private: true, description: 'App', owner: { login: 'salvamiguel' } },
+          { name: 'arq', full_name: 'acme/arq', private: false, description: null, owner: { login: 'acme' } },
+        ] }));
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    const result = await installedRepos(fetcher);
+    expect(result.repos.map((r) => r.fullName)).toEqual(['acme/arq', 'salvamiguel/trazo']);
+    expect(result.configureUrls).toEqual(['https://github.com/settings/installations/7']);
+    expect(seen.every((s) => s.endsWith('Bearer ghu_old'))).toBe(true);
   });
 });

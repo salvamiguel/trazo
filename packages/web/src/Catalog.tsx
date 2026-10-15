@@ -192,7 +192,7 @@ export function Catalog({ theme, initial, focus, revision, onOpen, onNew, onConn
               </>
             ) : (
               <button className="gh-login" onClick={startGitHubLogin}>
-                <IconGlyph icon="logos:github-icon" size={16} /> Iniciar sesión con GitHub
+                <IconGlyph icon="logos:github-icon" size={17} /> Iniciar sesión con GitHub
               </button>
             )}
           </div>
