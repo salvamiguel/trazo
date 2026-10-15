@@ -78,7 +78,15 @@ export interface PublishOptions {
 }
 
 export type PublishResult =
-  | { ok: true; version: Version; url: string; review: boolean; branch?: string }
+  | {
+      ok: true;
+      version: Version;
+      url: string;
+      review: boolean;
+      branch?: string;
+      /** The repository was empty: this publish made its first commit, straight to the branch. */
+      initial?: boolean;
+    }
   | { ok: false; conflict: string[] };
 
 export interface Library {
