@@ -47,11 +47,21 @@ export class GitLabHost implements GitHost {
   }
 
   async defaultBranch(): Promise<string> {
-    return (await this.call<{ default_branch: string }>(this.project())).default_branch;
+    // Empty projects may have no default branch yet; the first commit then creates `main`.
+    return (await this.call<{ default_branch: string | null }>(this.project())).default_branch || 'main';
   }
 
   async snapshot(branch: string): Promise<Snapshot> {
-    const b = await this.call<{ commit: { id: string } }>(`${this.project()}/repository/branches/${encodeURIComponent(branch)}`);
+    let b: { commit: { id: string } };
+    try {
+      b = await this.call<{ commit: { id: string } }>(`${this.project()}/repository/branches/${encodeURIComponent(branch)}`);
+    } catch (err) {
+      // A missing branch in a project without commits is an empty repository, not an error.
+      if (err instanceof LibraryError && err.status === 404 && (await this.call<{ empty_repo?: boolean }>(this.project())).empty_repo) {
+        return { branch, commit: '', files: [], empty: true };
+      }
+      throw err;
+    }
     const files: TreeFile[] = [];
     const root = (this.config.root ?? '').replace(/^\/+|\/+$/g, '');
     for (let page = 1; ; page++) {
@@ -77,7 +87,7 @@ export class GitLabHost implements GitHost {
     return (await this.raw(`${this.project()}/repository/blobs/${file.sha}/raw`)).text();
   }
 
-  async commit(branch: string, changes: Change[], message: string, from?: string): Promise<string> {
+  async commit(branch: string, changes: Change[], message: string, from?: string | null): Promise<string> {
     const c = await this.call<{ id: string; web_url?: string }>(`${this.project()}/repository/commits`, {
       method: 'POST',
       body: {

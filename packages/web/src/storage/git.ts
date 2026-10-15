@@ -17,6 +17,8 @@ export interface Snapshot {
   branch: string;
   commit: string;
   files: TreeFile[];
+  /** The repository has no commits yet (`commit` is empty); the first publish creates the branch. */
+  empty?: boolean;
 }
 
 /** File changes of one commit; `content: null` deletes the file. */
@@ -35,8 +37,11 @@ export interface GitHost {
   /** Snapshot of a branch, or undefined if it does not exist. */
   maybeSnapshot(branch: string): Promise<Snapshot | undefined>;
   blob(file: TreeFile): Promise<string>;
-  /** Commits on `branch`, creating it from `from` (a commit id) when given. Returns the commit's web URL. */
-  commit(branch: string, changes: Change[], message: string, from?: string): Promise<string>;
+  /**
+   * Commits on `branch`, creating it from `from` (a commit id) when given, or as the repository's
+   * first commit when `from` is null. Returns the commit's web URL.
+   */
+  commit(branch: string, changes: Change[], message: string, from?: string | null): Promise<string>;
   /** Opens (or finds the open) pull/merge request from `branch` into `base`; returns its web URL. */
   review(branch: string, base: string, title: string, body: string): Promise<string>;
   webUrl(branch: string, path: string): string;
@@ -160,9 +165,16 @@ export class GitLibrary implements Library {
     opts: PublishOptions,
   ): Promise<PublishResult> {
     const main = await this.base();
-    const target = opts.review ? (opts.branch ?? reviewBranch(path)) : main;
-    const existing = target === main ? await this.host.snapshot(main) : await this.host.maybeSnapshot(target);
+    let target = opts.review ? (opts.branch ?? reviewBranch(path)) : main;
+    let existing = target === main ? await this.host.snapshot(main) : await this.host.maybeSnapshot(target);
     const snap = existing ?? (await this.host.snapshot(main));
+    // An empty repository has no branch to review against: the first publish creates it directly.
+    const initial = !!snap.empty;
+    if (initial) {
+      target = main;
+      existing = snap;
+    }
+    const review = opts.review && !initial;
     const onBranch = new Map(snap.files.map((f) => [f.path, f.sha]));
 
     // Files of this architecture on the branch now, and what we will write.
@@ -186,12 +198,11 @@ export class GitLibrary implements Library {
     for (const f of current) if (!next.has(f.path)) changes.push({ path: f.path, content: null, exists: true });
 
     const title = opts.message.split('\n')[0]!;
-    if (!changes.length && !(opts.review && existing)) {
-      return { ok: true, version, url: this.host.webUrl(target, path), review: opts.review, branch: opts.review ? target : undefined };
-    }
-    let url = changes.length ? await this.host.commit(target, changes, opts.message, existing ? undefined : snap.commit) : this.host.webUrl(target, path);
-    if (opts.review) url = await this.host.review(target, main, title, `${opts.message}\n\nPublicado desde Trazo: \`${path || '/'}\`.`);
-    return { ok: true, version, url, review: opts.review, branch: opts.review ? target : undefined };
+    const done = (url: string): PublishResult => ({ ok: true, version, url, review, branch: review ? target : undefined, ...(initial ? { initial } : {}) });
+    if (!changes.length && !(review && existing)) return done(this.host.webUrl(target, path));
+    let url = changes.length ? await this.host.commit(target, changes, opts.message, initial ? null : existing ? undefined : snap.commit) : this.host.webUrl(target, path);
+    if (review) url = await this.host.review(target, main, title, `${opts.message}\n\nPublicado desde Trazo: \`${path || '/'}\`.`);
+    return done(url);
   }
 
   webUrl(path: string): string | undefined {

@@ -20,6 +20,8 @@ arquitecturas/
 README.md
 ```
 
+Un repositorio recién creado y vacío también sirve: el catálogo sale vacío y la primera arquitectura que publiques crea la rama con un commit directo, porque todavía no hay rama contra la que abrir un pull request. A partir de ahí, las publicaciones van como siempre.
+
 Al conectar la biblioteca se puede indicar una rama y una carpeta (`arquitecturas` en el ejemplo) para que Trazo ignore el resto del repositorio. Pegar una URL como `https://github.com/empresa/repo/tree/main/arquitecturas` rellena las dos.
 
 ## Lo que muestra el catálogo

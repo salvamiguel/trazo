@@ -252,7 +252,7 @@ export function PublishDialog({ library, path, title, isNew, openReview, onPubli
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [conflict, setConflict] = useState<string[]>();
-  const [done, setDone] = useState<{ url: string; review: boolean }>();
+  const [done, setDone] = useState<{ url: string; review: boolean; initial?: boolean }>();
   const input = useAutofocus<HTMLTextAreaElement>();
   const pr = library.kind === 'gitlab' ? 'merge request' : 'pull request';
   const branch = library.branch ?? 'la rama principal';
@@ -262,7 +262,7 @@ export function PublishDialog({ library, path, title, isNew, openReview, onPubli
     setError(undefined);
     try {
       const r = await onPublish(message.trim() || `Actualiza ${title}`, review, force);
-      if (r.ok) setDone({ url: r.url, review: r.review });
+      if (r.ok) setDone({ url: r.url, review: r.review, initial: r.initial });
       else setConflict(r.conflict);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -277,6 +277,7 @@ export function PublishDialog({ library, path, title, isNew, openReview, onPubli
         <div className="modal-body">
           <p className="modal-text">
             {done.review ? <>Los cambios están en un {pr} para que el equipo los revise.</> : <>Los cambios están en <b>{branch}</b>.</>}
+            {done.initial && review && <> El repositorio estaba vacío, así que este primer commit va directo a la rama: aún no hay rama contra la que abrir un {pr}.</>}
           </p>
           <footer>
             <a className="ghost-btn" href={done.url} target="_blank" rel="noreferrer">{done.review ? `Abrir el ${pr}` : 'Ver el commit'}</a>

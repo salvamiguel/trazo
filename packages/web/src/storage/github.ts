@@ -8,6 +8,8 @@ type Config = LibraryConfig & { kind: 'github' };
 export type TokenSource = string | (() => Promise<string | undefined>) | undefined;
 
 const decodeBase64 = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0)));
+const encodeBase64 = (text: string) => btoa(Array.from(new TextEncoder().encode(text), (b) => String.fromCharCode(b)).join(''));
+const refPath = (branch: string) => encodeURIComponent(branch).replace(/%2F/g, '/');
 
 export class GitHubHost implements GitHost {
   private api: string;
@@ -52,8 +54,14 @@ export class GitHubHost implements GitHost {
   }
 
   async snapshot(branch: string): Promise<Snapshot> {
-    const ref = await this.call<{ object: { sha: string } }>(`${this.repo()}/git/ref/heads/${encodeURIComponent(branch).replace(/%2F/g, '/')}`);
-    const commit = ref.object.sha;
+    let commit: string;
+    try {
+      commit = (await this.call<{ object: { sha: string } }>(`${this.repo()}/git/ref/heads/${refPath(branch)}`)).object.sha;
+    } catch (err) {
+      // GitHub answers 409 "Git Repository is empty" for a repository without commits.
+      if (err instanceof LibraryError && err.status === 409) return { branch, commit: '', files: [], empty: true };
+      throw err;
+    }
     const treeSha = (await this.call<{ tree: { sha: string } }>(`${this.repo()}/git/commits/${commit}`)).tree.sha;
     const tree = await this.call<{ tree: Array<{ path: string; type: string; sha: string }>; truncated: boolean }>(`${this.repo()}/git/trees/${treeSha}?recursive=1`);
     if (tree.truncated) console.warn('GitHub truncated the repository tree; set a root folder for the library.');
@@ -74,8 +82,9 @@ export class GitHubHost implements GitHost {
     return b.encoding === 'base64' ? decodeBase64(b.content) : b.content;
   }
 
-  async commit(branch: string, changes: Change[], message: string, from?: string): Promise<string> {
-    const parent = from ?? (await this.call<{ object: { sha: string } }>(`${this.repo()}/git/ref/heads/${branch}`)).object.sha;
+  async commit(branch: string, changes: Change[], message: string, from?: string | null): Promise<string> {
+    if (from === null) return this.firstCommit(branch, changes, message);
+    const parent = from ?? (await this.call<{ object: { sha: string } }>(`${this.repo()}/git/ref/heads/${refPath(branch)}`)).object.sha;
     const baseTree = (await this.call<{ tree: { sha: string } }>(`${this.repo()}/git/commits/${parent}`)).tree.sha;
     const tree = await this.call<{ sha: string }>(`${this.repo()}/git/trees`, {
       method: 'POST',
@@ -91,6 +100,22 @@ export class GitHubHost implements GitHost {
     if (from) await this.call(`${this.repo()}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${branch}`, sha: commit.sha } });
     else await this.call(`${this.repo()}/git/refs/heads/${branch}`, { method: 'PATCH', body: { sha: commit.sha, force: false } });
     return commit.html_url ?? `${this.web}/${this.config.owner}/${this.config.repo}/commit/${commit.sha}`;
+  }
+
+  /**
+   * The git data API refuses to work on an empty repository (409), so the first file goes in
+   * through the contents API, which creates the branch; the rest follow in a normal commit.
+   */
+  private async firstCommit(branch: string, changes: Change[], message: string): Promise<string> {
+    const [first, ...rest] = changes.filter((c) => c.content !== null);
+    if (!first) throw new LibraryError('No hay nada que publicar.');
+    const path = first.path.split('/').map(encodeURIComponent).join('/');
+    const put = await this.call<{ commit: { sha: string; html_url?: string } }>(`${this.repo()}/contents/${path}`, {
+      method: 'PUT',
+      body: { message, content: encodeBase64(first.content!), branch },
+    });
+    if (rest.length) return this.commit(branch, rest, message, undefined);
+    return put.commit.html_url ?? `${this.web}/${this.config.owner}/${this.config.repo}/commit/${put.commit.sha}`;
   }
 
   async review(branch: string, base: string, title: string, body: string): Promise<string> {
@@ -109,7 +134,6 @@ function githubMessage(status: number, detail: string | undefined, repo: string,
   if (status === 403 && /rate limit/i.test(detail ?? '')) return 'GitHub ha limitado las consultas sin token. Añade un token para seguir.';
   if (status === 403) return `El token no tiene permiso para esta operación en ${repo}. Necesita «Contents» y «Pull requests» de lectura y escritura.`;
   if (status === 404) return hasToken ? `No se encuentra ${repo} o el token no tiene acceso.` : `No se encuentra ${repo}. Si es privado, añade un token.`;
-  if (status === 409) return `El repositorio ${repo} está vacío.`;
   if (status === 422) return `GitHub rechazó el cambio: ${detail ?? 'datos no válidos'}.`;
   return `GitHub respondió ${status}${detail ? `: ${detail}` : ''}.`;
 }

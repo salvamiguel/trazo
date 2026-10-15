@@ -22,7 +22,7 @@ nodes:
  * A tiny in-memory GitHub: refs point at commits, commits at flat trees (path → content).
  * Enough of the REST git data API for GitLibrary to list, load and publish against.
  */
-async function fakeGitHub(files: Record<string, string>) {
+async function fakeGitHub(files: Record<string, string> | null) {
   const blobs = new Map<string, string>();
   const commits = new Map<string, Record<string, string>>();
   const refs = new Map<string, string>();
@@ -40,7 +40,8 @@ async function fakeGitHub(files: Record<string, string>) {
     commits.set(id, shas);
     return id;
   };
-  refs.set('main', await store(files));
+  // null: an empty repository, with no commits or branches until the first file is written.
+  if (files) refs.set('main', await store(files));
   const trees = new Map<string, Record<string, string>>();
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -52,6 +53,14 @@ async function fakeGitHub(files: Record<string, string>) {
     calls.push(`${method} ${path}`);
     let m: RegExpExecArray | null;
     if (path === '' && method === 'GET') return json({ default_branch: 'main' });
+    // Like GitHub, the git data API refuses to work on an empty repository.
+    if (path.startsWith('/git/') && refs.size === 0) return json({ message: 'Git Repository is empty.' }, 409);
+    if ((m = /^\/contents\/(.+)$/.exec(path)) && method === 'PUT') {
+      const tree = refs.size ? read(body.branch) : {};
+      const sha = await store({ ...tree, [decodeURIComponent(m[1]!)]: Buffer.from(body.content, 'base64').toString('utf8') });
+      refs.set(body.branch, sha);
+      return json({ commit: { sha, html_url: `https://github.com/acme/arq/commit/${sha}` } }, 201);
+    }
     if ((m = /^\/git\/ref\/heads\/(.+)$/.exec(path))) {
       const sha = refs.get(m[1]!);
       return sha ? json({ object: { sha } }) : json({ message: 'Not Found' }, 404);
@@ -211,6 +220,23 @@ describe('a GitHub library', () => {
     expect(gh.read('main')['arquitecturas/pagos/views/infra.view.yaml']).toBe('title: Infra\n');
   });
 
+  it('works on an empty repository, whose first publish creates the branch', async () => {
+    const gh = await fakeGitHub(null);
+    const lib = library(gh.fetcher);
+    expect(await lib.list()).toEqual([]);
+    const sources = { model: 'nodes: []\n', views: { contexto: 'title: Contexto ñ\n', infra: 'title: Infra\n' } };
+    const r = await lib.publish('arquitecturas/nueva', sources, 'architecture.calm.yaml', undefined, { message: 'Primera arquitectura', review: true });
+    // There is no branch to open a pull request against yet, so it goes straight to main.
+    expect(r).toMatchObject({ ok: true, review: false, initial: true, branch: undefined });
+    expect(gh.pulls).toHaveLength(0);
+    expect(gh.read('main')).toEqual({
+      'arquitecturas/nueva/architecture.calm.yaml': 'nodes: []\n',
+      'arquitecturas/nueva/views/contexto.view.yaml': 'title: Contexto ñ\n',
+      'arquitecturas/nueva/views/infra.view.yaml': 'title: Infra\n',
+    });
+    expect((await library(gh.fetcher).list()).map((e) => e.path)).toEqual(['arquitecturas/nueva']);
+  });
+
   it('explains a missing private repository in Spanish', async () => {
     const fetcher = (async () => new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 })) as typeof fetch;
     const lib = new GitLibrary(new GitHubHost({ id: 'l', kind: 'github', name: 'x', owner: 'acme', repo: 'privado' }, undefined, fetcher));
@@ -219,6 +245,26 @@ describe('a GitHub library', () => {
 });
 
 describe('a GitLab library', () => {
+  it('treats a project without commits as an empty library and creates its branch', async () => {
+    const sent: Array<{ url: string; body?: { branch: string; start_sha?: string; actions: Array<{ action: string }> } }> = [];
+    const fetcher = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      sent.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.endsWith('/projects/acme%2Fvacio')) return new Response(JSON.stringify({ default_branch: null, empty_repo: true }));
+      if (url.includes('/repository/branches/')) return new Response('{"message":"404 Branch Not Found"}', { status: 404 });
+      if (url.endsWith('/repository/commits')) return new Response(JSON.stringify({ id: 'c1', web_url: 'https://gitlab.com/acme/vacio/-/commit/c1' }));
+      return new Response('{}', { status: 500 });
+    }) as typeof fetch;
+    const lib = new GitLibrary(new GitLabHost({ id: 'g', kind: 'gitlab', name: 'Vacío', project: 'acme/vacio' }, 'glpat', fetcher));
+    expect(await lib.list()).toEqual([]);
+    const r = await lib.publish('nueva', { model: 'nodes: []\n', views: {} }, 'architecture.calm.yaml', undefined, { message: 'Primera', review: true });
+    expect(r).toMatchObject({ ok: true, review: false, initial: true });
+    const commit = sent.find((s) => s.url.endsWith('/repository/commits'))!.body!;
+    expect(commit).toMatchObject({ branch: 'main', actions: [{ action: 'create' }] });
+    expect(commit.start_sha).toBeUndefined();
+    expect(sent.some((s) => s.url.includes('merge_requests'))).toBe(false);
+  });
+
   it('commits with create, update and delete actions from the right start', async () => {
     const sent: Array<{ url: string; body?: unknown; headers?: HeadersInit }> = [];
     const files = [
@@ -229,6 +275,7 @@ describe('a GitLab library', () => {
       const url = String(input);
       sent.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers: init?.headers });
       const ok = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+      if (url.endsWith('/projects/acme%2Farq')) return ok({ default_branch: 'main', empty_repo: false });
       if (url.includes('/repository/branches/main')) return ok({ commit: { id: 'abc' } });
       if (url.includes('/repository/branches/')) return new Response('{"message":"404 Branch Not Found"}', { status: 404 });
       if (url.includes('/repository/tree')) return ok(files);
